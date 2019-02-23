@@ -10,8 +10,8 @@ from pytube import YouTube
 import moviepy as mp
 
 # spotify verification
-client_credentials_manager = SpotifyClientCredentials(client_id='2c712f6e44554be984e7239d06a4b1e5',
-                                                      client_secret='d9fc9552db5b47aaae618c210c7b67a7')
+client_credentials_manager = SpotifyClientCredentials(client_id='ENTER CLIENT ID',
+                                                      client_secret='ENTER CLIENT SECRET')
 
 sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 threadList = []

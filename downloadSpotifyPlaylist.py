@@ -15,7 +15,7 @@ client_credentials_manager = SpotifyClientCredentials(client_id='ENTER CLIENT ID
 
 sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 threadList = []
-ffmpeg = 'C:\\Program Files\\ffmpeg-20180611-8c20ea8-win64-static\\bin\\ffmpeg.exe'
+ffmpeg = 'PATH TO FFMPEG'
 FNULL = open(os.devnull, 'w')
 
 # returns a list of all track objects from a playlist

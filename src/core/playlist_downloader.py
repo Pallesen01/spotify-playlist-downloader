@@ -13,6 +13,7 @@ from urllib.parse import urlparse, parse_qs
 from tqdm import tqdm
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 import json
+import concurrent.futures
 try:
     from .downloader_functions import *
 except ImportError:
@@ -144,6 +145,7 @@ def main():
             print("Error: Spotify credentials not configured")
             sys.exit(1)
         
+        print("Fetching playlist metadata from Spotify...")
         # Get playlist ID from URL
         if 'https://open.spotify.com/playlist/' in playlist_url:
             playlist_id = playlist_url.split('playlist/')[1].split('?')[0]
@@ -152,43 +154,54 @@ def main():
             playlist_user = playlist_url.split('user/')[1].split('/')[0]
             playlist_id = playlist_url.split('playlist/')[1].split('?')[0]
             playlist = sp.user_playlist(playlist_user, playlist_id)
-        
-        # Get playlist name and tracks
+        print(f"Fetched playlist metadata: {playlist['name']} (ID: {playlist['id']})")
+        print("Fetching all tracks in playlist (this may take a while for large playlists)...")
+        # Fetch all tracks with progress if paginated
+        tracks = []
+        results = playlist['tracks']
+        total_tracks = results['total']
+        fetched = 0
+        while results:
+            items = results['items']
+            tracks.extend(items)
+            fetched += len(items)
+            print(f"  - Fetched {fetched}/{total_tracks} tracks...")
+            if results.get('next'):
+                results = sp.next(results)
+            else:
+                break
+        print(f"All tracks fetched: {len(tracks)} total.")
         playlist_name = playlist['name']
-        tracks = playlist['tracks']['items']
-        
-        # Get total number of tracks
-        total_tracks = playlist['tracks']['total']
+        # Get total number of tracks (already set above)
         print(f"Found {total_tracks} tracks in playlist: {playlist_name}")
-        
-        # Check already downloaded songs
         print("Checking already downloaded songs...")
         downloaded_songs = get_downloaded_songs(playlist_name)
         
-        # Download songs
+        # Download songs in parallel (up to 5 at a time)
         with tqdm(total=total_tracks, desc="Processing Songs", unit="song", 
                  bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
                  mininterval=0.1, file=sys.stderr) as pbar:
-            for track in tracks:
-                if not track['track']:
-                    continue
-                
-                track_name = track['track']['name']
-                artist_name = track['track']['artists'][0]['name']
-                song_id = f"{track_name} - {artist_name}"
-                
-                if song_id in downloaded_songs:
-                    pbar.update(1)
-                    continue
-                
-                print(f"Downloading: {song_id}")
-                try:
-                    if download_song(track['track'], playlist_name):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                futures = []
+                for track in tracks:
+                    if not track['track']:
                         pbar.update(1)
-                except Exception as e:
-                    print(f"Error downloading {song_id}: {str(e)}", file=sys.stderr)
-                    continue
-        
+                        continue
+                    track_name = track['track']['name']
+                    artist_name = track['track']['artists'][0]['name']
+                    song_id = f"{track_name} - {artist_name}"
+                    if song_id in downloaded_songs:
+                        pbar.update(1)
+                        continue
+                    # Submit download task
+                    futures.append(executor.submit(download_song, track['track'], playlist_name))
+                # As each download finishes, update the progress bar
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        print(f"Error downloading song: {e}", file=sys.stderr)
+                    pbar.update(1)
         print(f"Finished downloading playlist: {playlist_name}")
         
     except Exception as e:

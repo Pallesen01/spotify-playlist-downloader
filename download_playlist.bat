@@ -2,6 +2,10 @@
 :: Create Music directory if it doesn't exist
 if not exist "%USERPROFILE%\Desktop\Music" mkdir "%USERPROFILE%\Desktop\Music"
 
+:: Install required dependencies
+echo Installing dependencies...
+pip install spotipy yt-dlp pafy beautifulsoup4 pytube eyed3 requests >nul 2>&1
+
 :: Change file location to where you want the songs to be downloaded
 cd "%USERPROFILE%\Desktop\Music"
 

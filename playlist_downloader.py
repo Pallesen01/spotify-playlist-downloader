@@ -6,6 +6,9 @@ import shelve
 import threading
 import sys
 import argparse
+import webbrowser
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 from tqdm import tqdm
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from downloader_functions import *
@@ -33,13 +36,75 @@ if args.user_auth:
 
     oauth = SpotifyOAuth(client_id=client_id,
                          client_secret=client_secret,
-                         redirect_uri='http://localhost:8888/callback',
+                         redirect_uri='http://127.0.0.1:8888/callback',
                          scope='playlist-read-private playlist-read-collaborative',
                          cache_path='spotify_token_cache',
                          open_browser=True)
     token_info = oauth.get_cached_token()
     if not token_info:
-        token_info = oauth.get_access_token(as_dict=True)
+        # Set up callback server
+        auth_code = [None]  # Use list to avoid nonlocal issues
+        
+        class CallbackHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                parsed_url = urlparse(self.path)
+                if parsed_url.path == '/callback':
+                    query_params = parse_qs(parsed_url.query)
+                    if 'code' in query_params:
+                        auth_code[0] = query_params['code'][0]
+                        self.send_response(200)
+                        self.send_header('Content-type', 'text/html')
+                        self.end_headers()
+                        self.wfile.write(b'<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the application.</p></body></html>')
+                    else:
+                        self.send_response(400)
+                        self.send_header('Content-type', 'text/html')
+                        self.end_headers()
+                        self.wfile.write(b'<html><body><h1>Authorization failed!</h1><p>No authorization code received.</p></body></html>')
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            
+            def log_message(self, format, *args):
+                pass  # Suppress server logs
+        
+        # Start local server
+        server = HTTPServer(('127.0.0.1', 8888), CallbackHandler)
+        server.timeout = 60  # 60 second timeout
+        
+        print("Starting local server to handle Spotify callback...")
+        server_thread = threading.Thread(target=server.handle_request)
+        server_thread.daemon = True
+        server_thread.start()
+        
+        # Open browser for authorization
+        auth_url = oauth.get_authorize_url()
+        print(f"Opening browser for Spotify authorization...")
+        webbrowser.open(auth_url)
+        
+        # Wait for callback
+        print("Waiting for authorization... (will timeout in 60 seconds)")
+        print("If you see an error page, make sure you've added 'http://127.0.0.1:8888/callback' to your Spotify app's redirect URIs")
+        server_thread.join(timeout=60)
+        server.server_close()
+        
+        if auth_code[0]:
+            try:
+                token_info = oauth.get_access_token(auth_code[0], as_dict=False)
+                # Convert to dict format if it's a string
+                if isinstance(token_info, str):
+                    token_info = {'access_token': token_info}
+                print("Authorization successful!")
+            except Exception as e:
+                print(f"Error getting access token: {e}")
+                sys.exit(1)
+        else:
+            print("\nAuthorization timed out or failed.")
+            print("This usually means the redirect URI isn't configured in your Spotify app.")
+            print("Please add 'http://127.0.0.1:8888/callback' to your app's redirect URIs at:")
+            print("https://developer.spotify.com/dashboard")
+            print("\nAlternatively, you can run without --user-auth to use client credentials instead.")
+            sys.exit(1)
     sp = spotipy.Spotify(auth=token_info['access_token'])
 else:
     try:

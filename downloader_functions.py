@@ -12,28 +12,45 @@ def downloadSong(song):
 # returns a list of all track objects from a playlist
 def getTracks(playlist_url, sp):
     allTracks = []
-    if 'https://open.spotify.com/user/' in playlist_url:
-
+    if 'https://open.spotify.com/playlist/' in playlist_url:
+        # New format: https://open.spotify.com/playlist/ID
+        playlist_id = playlist_url.split('playlist/')[1].split('?')[0]
+        playlist = sp.playlist(playlist_id)
+    elif 'https://open.spotify.com/user/' in playlist_url:
+        # Old format: https://open.spotify.com/user/USER/playlist/ID
         playlist_user = playlist_url.split('user/')[1].split('/')[0]
         playlist_id = playlist_url.split('playlist/')[1]
         playlist_id = playlist_id.split('?', 1)[0]
-
+        playlist = sp.user_playlist(playlist_user, playlist_id)
     else:
+        # Spotify URI format
         playlist_user = playlist_url.split(':')[0]
         playlist_id = playlist_url.split(':')[-1]
         playlist_id = playlist_id.split('?', 1)[0]
-    
-    playlist = sp.user_playlist(playlist_user, playlist_id)
+        playlist = sp.user_playlist(playlist_user, playlist_id)
 
-    results = sp.user_playlist(playlist_user, playlist['id'], fields="tracks,next")
-    tracks = results['tracks']
-    for track in tracks['items']:
-        allTracks.append(Song(track['track'], playlist['name']))
-
-    while tracks['next']:
-        tracks = sp.next(tracks)
+    if 'https://open.spotify.com/playlist/' in playlist_url:
+        # For new format, use playlist_tracks
+        results = sp.playlist_tracks(playlist['id'])
+        tracks = results
         for track in tracks['items']:
             allTracks.append(Song(track['track'], playlist['name']))
+
+        while tracks['next']:
+            tracks = sp.next(tracks)
+            for track in tracks['items']:
+                allTracks.append(Song(track['track'], playlist['name']))
+    else:
+        # For old format, use user_playlist
+        results = sp.user_playlist(playlist_user, playlist['id'], fields="tracks,next")
+        tracks = results['tracks']
+        for track in tracks['items']:
+            allTracks.append(Song(track['track'], playlist['name']))
+
+        while tracks['next']:
+            tracks = sp.next(tracks)
+            for track in tracks['items']:
+                allTracks.append(Song(track['track'], playlist['name']))
 
     return allTracks, playlist['name']
 

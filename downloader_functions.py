@@ -1,5 +1,6 @@
 import urllib, pafy, os, spotipy, subprocess, eyed3, requests, youtube_dl
 from bs4 import BeautifulSoup
+import difflib
 from pytube import YouTube
 
 #download a song using song object
@@ -91,44 +92,54 @@ class Song():
         videoList = []
         closestVideo = None
         closestDur = None
-        durDiff = None
-        textToSearch = self.name + ' ' + self.artists[0]
+        bestVideo = None
+        bestRatio = 0
+        textToSearch = f"{self.name} {self.artists[0]}"
         query = urllib.parse.quote(textToSearch)
         url = "https://www.youtube.com/results?search_query=" + query
         response = urllib.request.urlopen(url)
         html = response.read()
         soup = BeautifulSoup(html, 'html5lib')
         backupVid = None
-        for vid in soup.findAll(attrs={'class':'yt-uix-tile-link'}):
+
+        for vid in soup.findAll(attrs={'class': 'yt-uix-tile-link'}):
             videoList.append('https://www.youtube.com' + vid['href'])
 
-        for url in videoList[:3]:
+        for url in videoList[:5]:
             try:
                 video = pafy.new(url)
-
-            except ValueError:
-                pass
-
             except Exception as e:
                 print("Error using pafy: ", e)
                 continue
 
-            durDiff = abs(video.length - self.duration)
-            if closestDur == None:
-                closestDur = durDiff
-                closestVideo = url
+            # measure title similarity to song name + artist
+            ratio = difflib.SequenceMatcher(None, textToSearch.lower(), video.title.lower()).ratio()
+            if ratio > bestRatio:
+                bestRatio = ratio
+                bestVideo = url
 
-            elif durDiff < closestDur:
+            durDiff = abs(video.length - self.duration)
+            if closestDur is None or durDiff < closestDur:
                 backupVid = closestVideo
                 closestDur = durDiff
                 closestVideo = url
 
-        if backupVid == None:
-            backupVid = videoList[1]
+        chosen = None
+        if bestRatio >= 0.6:
+            chosen = bestVideo
+            if backupVid is None:
+                backupVid = closestVideo
+        else:
+            chosen = closestVideo
+            if backupVid is None and len(videoList) > 1:
+                backupVid = videoList[1]
+
+        if chosen is None:
+            chosen = videoList[0]
 
         self.backupvid = backupVid
-        self.closesturl = closestVideo
-        self.video = pafy.new(closestVideo)
+        self.closesturl = chosen
+        self.video = pafy.new(chosen)
 
 
 

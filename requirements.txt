@@ -10,6 +10,9 @@ tqdm>=4.64.1
 pafy>=0.5.5
 pytube>=12.1.0
 
+# Web interface
+Flask>=2.0
+
 # Optional high-quality providers
 # Uncomment and configure environment variables to use:
 # qobuz-dl>=0.9.9.9

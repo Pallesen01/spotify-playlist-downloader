@@ -85,6 +85,146 @@ def download_from_qobuz(song, quiet=False):
             print(f"Qobuz download failed for {song.name}: {e}")
         return False
 
+def get_audio_bitrate(file_path):
+    """Return the bitrate of the audio stream in bits per second or None."""
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+                '-show_entries', 'stream=bit_rate',
+                '-of', 'default=noprint_wrappers=1:nokey=1', file_path
+            ],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip())
+    except Exception:
+        pass
+    return None
+
+def adjust_audio_format(file_path, quiet=False):
+    """Convert the downloaded file to flac or mp3 based on bitrate."""
+    bitrate = get_audio_bitrate(file_path)
+    ext = os.path.splitext(file_path)[1].lower()
+    try:
+        if bitrate and bitrate > 320000:
+            if ext != '.flac':
+                new_path = os.path.splitext(file_path)[0] + '.flac'
+                FNULL = open(os.devnull, 'w')
+                subprocess.call(['ffmpeg', '-y', '-i', file_path, new_path],
+                                stdout=FNULL, stderr=subprocess.STDOUT)
+                os.remove(file_path)
+                return new_path
+        else:
+            if ext != '.mp3':
+                new_path = os.path.splitext(file_path)[0] + '.mp3'
+                FNULL = open(os.devnull, 'w')
+                subprocess.call(['ffmpeg', '-y', '-i', file_path, new_path],
+                                stdout=FNULL, stderr=subprocess.STDOUT)
+                os.remove(file_path)
+                return new_path
+    except Exception:
+        if not quiet:
+            print(f"Format adjustment failed for {file_path}")
+    return file_path
+
+def download_from_bandcamp(song, quiet=False):
+    """Attempt to download from Bandcamp using yt-dlp."""
+    try:
+        query = urllib.parse.quote(f"{song.name} {song.artists[0]}")
+        search_url = f"https://bandcamp.com/search?q={query}"
+        res = requests.get(search_url, timeout=15)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, 'html.parser')
+        link_tag = soup.select_one('li.searchresult a.itemurl')
+        if not link_tag or not link_tag.get('href'):
+            return False
+        url = link_tag['href']
+
+        os.makedirs(song.folder_name, exist_ok=True)
+        output_path = os.path.join(song.folder_name, song.name_file + '.%(ext)s')
+        cmd = [
+            'yt-dlp', '--extract-audio', '--audio-format', 'best',
+            '--audio-quality', '0', '--output', output_path, url
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            return False
+        for f in os.listdir(song.folder_name):
+            if f.startswith(song.name_file):
+                song.file = os.path.join(song.folder_name, f)
+                break
+        if not song.file:
+            return False
+        song.file = adjust_audio_format(song.file, quiet=quiet)
+        return True
+    except Exception as e:
+        if not quiet:
+            print(f"Bandcamp download failed for {song.name}: {e}")
+        return False
+
+def download_from_soundcloud(song, quiet=False):
+    """Download audio from SoundCloud via yt-dlp search."""
+    try:
+        query = f"{song.name} {song.artists[0]}"
+        os.makedirs(song.folder_name, exist_ok=True)
+        output_path = os.path.join(song.folder_name, song.name_file + '.%(ext)s')
+        cmd = [
+            'yt-dlp', '--extract-audio', '--audio-format', 'best',
+            '--audio-quality', '0', '--output', output_path,
+            f'scsearch1:{query}'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            return False
+        for f in os.listdir(song.folder_name):
+            if f.startswith(song.name_file):
+                song.file = os.path.join(song.folder_name, f)
+                break
+        if not song.file:
+            return False
+        song.file = adjust_audio_format(song.file, quiet=quiet)
+        return True
+    except Exception as e:
+        if not quiet:
+            print(f"SoundCloud download failed for {song.name}: {e}")
+        return False
+
+def download_from_jamendo(song, quiet=False):
+    """Download from Jamendo using its open API."""
+    client_id = os.getenv('JAMENDO_CLIENT_ID')
+    if not client_id:
+        return False
+    try:
+        query = urllib.parse.quote(f"{song.name} {song.artists[0]}")
+        api_url = (
+            f"https://api.jamendo.com/v3.0/tracks/?client_id={client_id}&format=json"
+            f"&limit=1&search={query}"
+        )
+        res = requests.get(api_url, timeout=15)
+        res.raise_for_status()
+        data = res.json()
+        tracks = data.get('results')
+        if not tracks:
+            return False
+        url = tracks[0].get('audiodownload') or tracks[0].get('audio')
+        if not url:
+            return False
+        os.makedirs(song.folder_name, exist_ok=True)
+        fname = os.path.join(song.folder_name, song.name_file + '.mp3')
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(fname, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+        song.file = adjust_audio_format(fname, quiet=quiet)
+        return True
+    except Exception as e:
+        if not quiet:
+            print(f"Jamendo download failed for {song.name}: {e}")
+        return False
+
 #download a song using song object
 def downloadSong(song, quiet=False):
     if not quiet:
@@ -336,8 +476,14 @@ class Song():
     def download(self, quiet=False):
         import subprocess
 
-        # Try high quality download first
+        # Try high quality download sources in order
         if download_from_qobuz(self, quiet=quiet):
+            return
+        if download_from_bandcamp(self, quiet=quiet):
+            return
+        if download_from_soundcloud(self, quiet=quiet):
+            return
+        if download_from_jamendo(self, quiet=quiet):
             return
 
         self.get_link(quiet=quiet)

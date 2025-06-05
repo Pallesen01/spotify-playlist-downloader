@@ -35,7 +35,21 @@ export QOBUZ_SECRETS="secret1,secret2,..."
 ```
 
 When these are provided the downloader will attempt to fetch FLAC files from
-Qobuz. If the download fails, it falls back to YouTube as before.
+Qobuz. You can optionally set a Jamendo API client ID to enable downloads from
+Jamendo as well:
+
+```
+export JAMENDO_CLIENT_ID="your-client-id"
+```
+
+The downloader attempts the following sources in order of quality:
+1. Qobuz (lossless when available)
+2. Bandcamp
+3. SoundCloud
+4. Jamendo
+5. YouTube
+
+If all high quality sources fail, it falls back to YouTube as before.
 
 To download only the first N songs, provide the `--limit` option:
 

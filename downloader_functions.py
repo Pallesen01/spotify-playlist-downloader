@@ -92,20 +92,20 @@ def deleteAllImages(folder_name):
 def getUri(file):
     try:
         audiofile = eyed3.load(file)
+        
+        # Check if eyed3 successfully loaded the file
+        if audiofile is None or audiofile.tag is None:
+            return None
 
-    except TypeError as e:
-        print("Error loading song for getting uri")
-        print(e)
-
-    try:
         return audiofile.tag.publisher
 
-    except AttributeError as e:
-        print("Error setting file attributes")
+    except (TypeError, AttributeError) as e:
+        print("Error loading song for getting uri")
         print(e)
+        return None
 
     except UnboundLocalError:
-        pass
+        return None
 
 #Delete all songs from playlist folder that aren't in playlist
 def delRemoved(playlistFolderURIs, songs, folder_name):
@@ -272,7 +272,7 @@ class Song():
                         self.file = final_path
                         break
                 else:
-                                        self.file = final_path
+                    self.file = final_path
                     
         except Exception as e:
             if not quiet:
@@ -346,12 +346,26 @@ class Song():
         #TEMP SET VAR
         self.file = os.path.join(self.folder_name, self.name_file)+".mp3"
 
+        # Check if file exists first
+        if not os.path.exists(self.file):
+            if not quiet:
+                print(f"Cannot set attributes: file {self.file} does not exist")
+            return
+
         try:
             audiofile = eyed3.load(self.file)
+            
+            # Check if eyed3 successfully loaded the file
+            if audiofile is None or audiofile.tag is None:
+                if not quiet:
+                    print(f"Cannot set attributes: {self.file} is not a valid audio file")
+                return
 
         except TypeError as e:
-            print("Error loading song for setting attributes")
-            print(e)
+            if not quiet:
+                print("Error loading song for setting attributes")
+                print(e)
+            return
 
         try:
             try:
@@ -371,8 +385,9 @@ class Song():
             audiofile.tag.save(self.file)
 
         except AttributeError as e:
-            print("Error setting file attributes")
-            print(e)
+            if not quiet:
+                print("Error setting file attributes")
+                print(e)
 
         except UnboundLocalError:
             pass

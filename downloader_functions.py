@@ -12,6 +12,79 @@ except ImportError:
     pafy = None
     print("Warning: pafy not available, using yt-dlp only")
 
+# Attempt high quality downloads from Qobuz if credentials are provided
+def download_from_qobuz(song, quiet=False):
+    """Download a song from Qobuz if possible.
+
+    This function requires the environment variables ``QOBUZ_EMAIL``,
+    ``QOBUZ_PASSWORD``, ``QOBUZ_APP_ID`` and ``QOBUZ_SECRETS`` (comma separated
+    secrets). If any of these are missing or the download fails, ``False`` is
+    returned so the caller can fall back to the usual YouTube method.
+    """
+
+    q_email = os.getenv("QOBUZ_EMAIL")
+    q_pass = os.getenv("QOBUZ_PASSWORD")
+    q_app_id = os.getenv("QOBUZ_APP_ID")
+    q_secrets = os.getenv("QOBUZ_SECRETS")
+
+    if not all([q_email, q_pass, q_app_id, q_secrets]):
+        return False
+
+    try:
+        from qobuz_dl.qopy import Client
+    except Exception:
+        return False
+
+    try:
+        secrets = [s for s in q_secrets.split(',') if s]
+        client = Client(q_email, q_pass, q_app_id, secrets)
+        query = f"{song.name} {song.artists[0]}"
+        res = client.search_tracks(query, limit=1)
+        items = res.get('tracks', {}).get('items', [])
+        if not items:
+            return False
+
+        track_id = items[0]['id']
+
+        # Try hi-res >96kHz then <96kHz then lossless
+        fmt_ids = [27, 7, 6]
+        track_data = None
+        for fmt in fmt_ids:
+            try:
+                track_data = client.get_track_url(track_id, fmt_id=fmt)
+                if 'url' in track_data:
+                    break
+            except Exception:
+                track_data = None
+        if not track_data or 'url' not in track_data:
+            # Fallback to 320k mp3
+            track_data = client.get_track_url(track_id, fmt_id=5)
+
+        url = track_data.get('url')
+        if not url:
+            return False
+
+        bitrate = track_data.get('bitrate', 0)
+        bit_depth = track_data.get('bit_depth')
+        ext = '.flac' if (bit_depth and bitrate and bitrate > 320000) else '.mp3'
+
+        os.makedirs(song.folder_name, exist_ok=True)
+        fname = os.path.join(song.folder_name, song.name_file + ext)
+
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(fname, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+        song.file = fname
+        return True
+    except Exception as e:
+        if not quiet:
+            print(f"Qobuz download failed for {song.name}: {e}")
+        return False
+
 #download a song using song object
 def downloadSong(song, quiet=False):
     if not quiet:
@@ -262,10 +335,14 @@ class Song():
 
     def download(self, quiet=False):
         import subprocess
-        
+
+        # Try high quality download first
+        if download_from_qobuz(self, quiet=quiet):
+            return
+
         self.get_link(quiet=quiet)
         os.makedirs(self.folder_name, exist_ok=True)
-        
+
         output_path = os.path.join(self.folder_name, self.name_file + ".%(ext)s")
         final_path = os.path.join(self.folder_name, self.name_file + ".mp3")
         
@@ -377,8 +454,9 @@ class Song():
 
     # assigns id3 attributes to mp3 file
     def set_file_attributes(self, quiet=False):
-        #TEMP SET VAR
-        self.file = os.path.join(self.folder_name, self.name_file)+".mp3"
+        # Ensure we have the downloaded file path
+        if not self.file:
+            self.file = os.path.join(self.folder_name, self.name_file + ".mp3")
 
         # Check if file exists first
         if not os.path.exists(self.file):

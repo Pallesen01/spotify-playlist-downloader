@@ -1,7 +1,10 @@
-import spotipy, os, urllib, pafy, shelve, threading, sys
+import spotipy
+import os
+import shelve
+import sys
+import asyncio
 from spotipy.oauth2 import SpotifyClientCredentials
 from downloader_functions import *
-from bs4 import BeautifulSoup
 
 shelveFile = shelve.open('spotify_data')
 
@@ -25,8 +28,7 @@ shelveFile.close()
 #test_link = "https://open.spotify.com/user/sparks_of_fire/playlist/4ScHDVxjzDpBFOyyKdWw6G?si=R_AFDhOJTYymeBpjs96jhw"
 
 #set variables
-threadList = [] # stores all threads
-downloadQueue = [] #songs to be downloaded
+downloadQueue = []  # songs to be downloaded
 
 try:
     playlist_url = sys.argv[1]
@@ -62,30 +64,22 @@ for folder in os.listdir():
 for song in songs:
     if song.uri in URIs:
         print(song.name, "already downloaded")
-
     else:
         downloadQueue.append(song)
 
-#While there are songs in download queue download songs
-while len(downloadQueue) > 0:
-    if len(threadList) <= 4:
-        threadObj = threading.Thread(target=downloadSong, args=[downloadQueue.pop(0)])
-        threadObj.handled = False
-        threadList.append(threadObj)
-        threadObj.start()
 
-    for t in threadList:
-        if not t.is_alive():
-            #print("Thread Done")
-            t.handled = True
-    threadList = [t for t in threadList if not t.handled]
+async def main():
+    semaphore = asyncio.Semaphore(4)
+    tasks = [downloadSong(song, semaphore) for song in downloadQueue]
+    if tasks:
+        await asyncio.gather(*tasks)
 
-#Wait for all thread to finish
-for t in threadList:
-    t.join()
+    print("Deleting images")
+    deleteAllImages(folder_name)
+    print("Deleting Removed Songs")
+    delRemoved(playlistFolderURIs, songs, folder_name)
+    print("Done")
 
-print("Deleting images")
-deleteAllImages(folder_name)
-print("Deleting Removed Songs")
-delRemoved(playlistFolderURIs, songs, folder_name)
-print("Done")
+
+if __name__ == "__main__":
+    asyncio.run(main())

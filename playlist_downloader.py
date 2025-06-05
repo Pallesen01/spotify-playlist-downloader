@@ -1,4 +1,5 @@
 import spotipy, os, urllib, pafy, shelve, threading, sys
+from tqdm import tqdm
 from spotipy.oauth2 import SpotifyClientCredentials
 from downloader_functions import *
 from bs4 import BeautifulSoup
@@ -39,6 +40,7 @@ print("Getting all songs from playlist...")
 songs, folder_name = getTracks(playlist_url, sp)
 os.makedirs(folder_name, exist_ok=True)
 
+# Get already downloaded songs
 print("Getting already downloaded songs...")
 #get URIs of downloaded songs
 URIs = []
@@ -66,9 +68,12 @@ for song in songs:
     else:
         downloadQueue.append(song)
 
-#While there are songs in download queue download songs
-while len(downloadQueue) > 0:
-    if len(threadList) <= 4:
+total_songs = len(downloadQueue)
+progress_bar = tqdm(total=total_songs, desc="Songs downloaded")
+
+# While there are songs in download queue download songs
+while len(downloadQueue) > 0 or len(threadList) > 0:
+    while len(downloadQueue) > 0 and len(threadList) <= 4:
         threadObj = threading.Thread(target=downloadSong, args=[downloadQueue.pop(0)])
         threadObj.handled = False
         threadList.append(threadObj)
@@ -76,13 +81,15 @@ while len(downloadQueue) > 0:
 
     for t in threadList:
         if not t.is_alive():
-            #print("Thread Done")
             t.handled = True
+            progress_bar.update(1)
     threadList = [t for t in threadList if not t.handled]
 
 #Wait for all thread to finish
 for t in threadList:
     t.join()
+
+progress_bar.close()
 
 print("Deleting images")
 deleteAllImages(folder_name)

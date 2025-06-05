@@ -30,9 +30,10 @@ downloadQueue = [] #songs to be downloaded
 
 try:
     playlist_url = sys.argv[1]
-
 except IndexError:
     print("Error - no playlist link found")
+    print("Usage: python playlist_downloader.py <playlist_url>")
+    sys.exit(1)
 
 print("Getting all songs from playlist...")
 songs, folder_name = getTracks(playlist_url, sp)

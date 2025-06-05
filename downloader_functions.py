@@ -114,7 +114,7 @@ class Song():
         url = "https://www.youtube.com/results?search_query=" + query
         response = urllib.request.urlopen(url)
         html = response.read()
-        soup = BeautifulSoup(html, 'html5lib')
+        soup = BeautifulSoup(html, 'html.parser')
         backupVid = None
         for vid in soup.findAll(attrs={'class':'yt-uix-tile-link'}):
             videoList.append('https://www.youtube.com' + vid['href'])

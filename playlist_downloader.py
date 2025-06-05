@@ -75,7 +75,7 @@ while len(downloadQueue) > 0:
         threadObj.start()
 
     for t in threadList:
-        if not t.isAlive():
+        if not t.is_alive():
             #print("Thread Done")
             t.handled = True
     threadList = [t for t in threadList if not t.handled]

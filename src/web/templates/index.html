@@ -110,6 +110,17 @@
 <body>
     <h1>Spotify Playlist Downloader</h1>
     
+    <div class="form-group" style="margin-bottom: 10px;">
+        <button id="showIntervalFormBtn" style="background:#1DB954; color:white; padding:7px 16px; border-radius:4px; border:none; margin-bottom:6px;">Change sync interval</button>
+        <form id="intervalForm" action="/set_interval" method="POST" style="display:none; margin-top:8px; align-items: center; gap: 10px;">
+            <label for="interval" style="font-weight: bold;">Sync interval:</label>
+            <input type="number" name="interval" id="interval" min="1" value="{{ interval_minutes }}" style="width:80px; padding:6px;">
+            <span style="color:#666; font-size:0.95em;">minutes</span>
+            <button type="submit" style="background:#1DB954; color:white; padding:7px 16px; border-radius:4px; border:none;">Set</button>
+        </form>
+        <div style="color:#666; font-size:0.95em; margin-top:4px;">Current sync interval: <b>{{ interval_minutes }}</b> minute{% if interval_minutes != 1 %}s{% endif %}</div>
+    </div>
+
     {% if not has_credentials %}
     <div class="warning">
         Warning: Spotify credentials are not configured. Please add your Spotify client ID and secret to config.json.
@@ -316,6 +327,19 @@
                 body: JSON.stringify({ order: order })
             });
         }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var btn = document.getElementById('showIntervalFormBtn');
+            var form = document.getElementById('intervalForm');
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                if (form.style.display === 'none') {
+                    form.style.display = 'flex';
+                } else {
+                    form.style.display = 'none';
+                }
+            });
+        });
     </script>
 </body>
 </html> 

@@ -13,7 +13,23 @@ import datetime
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PLAYLIST_FILE = os.path.join(PROJECT_ROOT, 'playlists.json')
 CONFIG_FILE = os.path.join(PROJECT_ROOT, 'config.json')
-INTERVAL = 3600  # 1 hour
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            try:
+                return json.load(f)
+            except Exception:
+                return {}
+    return {}
+
+def get_interval():
+    config = load_config()
+    # Store interval in minutes, use seconds internally
+    interval_minutes = int(config.get('sync_interval_minutes', 60))
+    return interval_minutes * 60
+
+INTERVAL = get_interval()  # Default 1 hour, can be changed
 next_sync_time = None  # Global for next sync time
 
 app = Flask(__name__)
@@ -32,15 +48,6 @@ current_progress = {
 }
 # Add a global for the current subprocess
 current_downloader_process = None
-
-def load_config():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r') as f:
-            try:
-                return json.load(f)
-            except Exception:
-                return {}
-    return {}
 
 def load_playlists():
     if os.path.exists(PLAYLIST_FILE):
@@ -211,6 +218,7 @@ def downloader_loop():
                         break
                     minutes_left = (seconds_left + 59) // 60
                     current_progress['stage'] = f"Waiting for next sync in {minutes_left} minute{'s' if minutes_left != 1 else ''}..."
+                    current_progress['current_song'] = None
                     time.sleep(10)  # Update every 10 seconds for better accuracy
                 # After waiting, loop will restart
         except Exception as e:
@@ -233,10 +241,12 @@ def index():
     playlists = load_playlists()
     config = load_config()
     has_credentials = bool(config.get('spotify', {}).get('client_id') and config.get('spotify', {}).get('client_secret'))
+    interval_minutes = int(config.get('sync_interval_minutes', 60))
     return render_template('index.html', 
                          playlists=playlists, 
                          has_credentials=has_credentials,
-                         downloader_running=downloader_running)
+                         downloader_running=downloader_running,
+                         interval_minutes=interval_minutes)
 
 @app.route('/add', methods=['POST'])
 def add_playlist():
@@ -301,6 +311,21 @@ def reorder_playlists():
             reordered.append(p)
     save_playlists(reordered)
     return ('', 204)
+
+@app.route('/set_interval', methods=['POST'])
+def set_interval():
+    interval = request.form.get('interval')
+    try:
+        interval = int(interval)
+        config = load_config()
+        config['sync_interval_minutes'] = interval
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f)
+        global INTERVAL
+        INTERVAL = interval * 60
+    except Exception:
+        pass
+    return redirect('/')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000) 

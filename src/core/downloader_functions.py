@@ -71,7 +71,7 @@ class DownloadProvider:
 def _ytdlp_download(song, url, quiet=False):
     """Common yt-dlp download logic"""
     os.makedirs(song.folder_name, exist_ok=True)
-    output_path = os.path.join(song.folder_name, song.name_file + '.%(ext)s')
+    output_path = os.path.join(song.folder_name, song.file_basename + '.%(ext)s')
     cmd = [
         'yt-dlp', '--extract-audio', '--audio-format', 'best',
         '--audio-quality', '0', '--output', output_path, url
@@ -82,7 +82,7 @@ def _ytdlp_download(song, url, quiet=False):
     
     # Find downloaded file
     for f in os.listdir(song.folder_name):
-        if f.startswith(song.name_file):
+        if f.startswith(song.file_basename):
             song.file = os.path.join(song.folder_name, f)
             break
     
@@ -95,7 +95,7 @@ def _ytdlp_download(song, url, quiet=False):
 def _direct_download(song, url, quiet=False):
     """Direct download without yt-dlp"""
     os.makedirs(song.folder_name, exist_ok=True)
-    fname = os.path.join(song.folder_name, song.name_file + '.mp3')
+    fname = os.path.join(song.folder_name, song.file_basename + '.mp3')
     
     with requests.get(url, stream=True) as r:
         r.raise_for_status()
@@ -121,7 +121,7 @@ def _qobuz_download(song, url_data, quiet=False):
     ext = '.flac' if (bit_depth and bitrate and bitrate > 320000) else '.mp3'
 
     os.makedirs(song.folder_name, exist_ok=True)
-    fname = os.path.join(song.folder_name, song.name_file + ext)
+    fname = os.path.join(song.folder_name, song.file_basename + ext)
 
     with requests.get(url, stream=True) as r:
         r.raise_for_status()
@@ -350,8 +350,9 @@ def getTracks(playlist_url, sp, limit=None):
         # For new format, use playlist_tracks
         results = sp.playlist_tracks(playlist['id'])
         tracks = results
+        playlist_folder = playlist['name']
         for track in tracks['items']:
-            allTracks.append(Song(track['track'], playlist['name']))
+            allTracks.append(Song(track['track'], playlist_folder))
             progress_bar.update(1)
             if limit is not None and len(allTracks) >= limit:
                 progress_bar.close()
@@ -360,7 +361,7 @@ def getTracks(playlist_url, sp, limit=None):
         while tracks['next'] and (limit is None or len(allTracks) < limit):
             tracks = sp.next(tracks)
             for track in tracks['items']:
-                allTracks.append(Song(track['track'], playlist['name']))
+                allTracks.append(Song(track['track'], playlist_folder))
                 progress_bar.update(1)
                 if limit is not None and len(allTracks) >= limit:
                     progress_bar.close()
@@ -369,8 +370,9 @@ def getTracks(playlist_url, sp, limit=None):
         # For old format, use user_playlist
         results = sp.user_playlist(playlist_user, playlist['id'], fields="tracks,next")
         tracks = results['tracks']
+        playlist_folder = playlist['name']
         for track in tracks['items']:
-            allTracks.append(Song(track['track'], playlist['name']))
+            allTracks.append(Song(track['track'], playlist_folder))
             progress_bar.update(1)
             if limit is not None and len(allTracks) >= limit:
                 progress_bar.close()
@@ -379,7 +381,7 @@ def getTracks(playlist_url, sp, limit=None):
         while tracks['next'] and (limit is None or len(allTracks) < limit):
             tracks = sp.next(tracks)
             for track in tracks['items']:
-                allTracks.append(Song(track['track'], playlist['name']))
+                allTracks.append(Song(track['track'], playlist_folder))
                 progress_bar.update(1)
                 if limit is not None and len(allTracks) >= limit:
                     progress_bar.close()
@@ -425,18 +427,33 @@ def delRemoved(playlistFolderURIs, songs, folder_name):
 
 #class for spotify track
 class Song():
-    def __init__(self, track, folder_name):
+    def __init__(self, track, playlist_folder):
         self.track = track
         self.name = track['name']
         self.name_file = track['name'].replace(':','').replace('?','').replace(';','').replace('<','').replace('>','').replace('*','').replace('|','').replace('/','').replace('\\','').replace('"','').replace("'","'").replace('á','a').replace('à','a').replace('ù','u').replace('Ä','A')
         self.artists = [artist['name'] for artist in track['artists']]
+        self.artist_folder = self._clean_name(self.artists[0]) if self.artists else 'Unknown Artist'
         self.duration = int(track['duration_ms']/1000)
         dur_mins = str(float(track['duration_ms']/1000/60)).split('.')
         self.duration_mins = dur_mins[0] + ':' + str(float('0.'+ dur_mins[1])*60).split('.')[0]
         self.album = track['album']['name']
+        self.album_folder = self._clean_name(self.album)
         self.art_urls = [art['url'] for art in track['album']['images']]
         self.uri = track['uri']
-        self.folder_name = folder_name
+        self.track_number = track.get('track_number', 0)
+        # Extract year from release_date (format: YYYY-MM-DD or YYYY)
+        release_date = track['album'].get('release_date', '')
+        self.album_year = release_date[:4] if release_date else 'UnknownYear'
+        self.album_folder_with_year = f"({self.album_year}) {self.album_folder}"
+        # Build the new folder structure
+        self.folder_name = os.path.join(playlist_folder, self.artist_folder, self.album_folder_with_year)
+        # Build the new file name: 04 - Untouched.flac
+        self.file_basename = f"{self.track_number:02d} - {self.name_file}"
+        self.file = None
+        self.art = None
+
+    def _clean_name(self, name):
+        return name.replace(':','').replace('?','').replace(';','').replace('<','').replace('>','').replace('*','').replace('|','').replace('/','').replace('\\','').replace('"','').replace("'","'").replace('á','a').replace('à','a').replace('ù','u').replace('Ä','A')
 
     def get_link(self, quiet=False):
         import json
@@ -548,8 +565,8 @@ class Song():
         self.get_link(quiet=quiet)
         os.makedirs(self.folder_name, exist_ok=True)
 
-        output_path = os.path.join(self.folder_name, self.name_file + ".%(ext)s")
-        final_path = os.path.join(self.folder_name, self.name_file + ".mp3")
+        output_path = os.path.join(self.folder_name, self.file_basename + ".%(ext)s")
+        final_path = os.path.join(self.folder_name, self.file_basename + ".mp3")
         
         try:
             # Use yt-dlp to download directly as mp3
@@ -576,13 +593,13 @@ class Song():
             
             # Find the actual downloaded file (yt-dlp might change the extension)
             for file in os.listdir(self.folder_name):
-                if file.startswith(self.name_file) and file.endswith('.mp3'):
+                if file.startswith(self.file_basename) and file.endswith('.mp3'):
                     self.file = os.path.join(self.folder_name, file)
                     break
             else:
                 # If no mp3 found, look for any file with our name and rename it
                 for file in os.listdir(self.folder_name):
-                    if file.startswith(self.name_file):
+                    if file.startswith(self.file_basename):
                         old_path = os.path.join(self.folder_name, file)
                         os.rename(old_path, final_path)
                         self.file = final_path
@@ -596,13 +613,13 @@ class Song():
             # Fallback to old method
             try:
                 if self.video and pafy:
-                    self.video.getbestaudio().download(filepath=os.path.join(self.folder_name, self.name_file))
+                    self.video.getbestaudio().download(filepath=os.path.join(self.folder_name, self.file_basename))
                     
                     FNULL = open(os.devnull, 'w')
                     if not quiet:
                         print("Converting", self.name)
-                    subprocess.call("ffmpeg -i \"" + os.path.join(self.folder_name, self.name_file)+"\" " + "\""+ final_path +"\"", stdout=FNULL, stderr=subprocess.STDOUT)
-                    os.remove(os.path.join(self.folder_name, self.name_file))
+                    subprocess.call(f"ffmpeg -i \"{os.path.join(self.folder_name, self.file_basename)}\" \"{final_path}\"", stdout=FNULL, stderr=subprocess.STDOUT)
+                    os.remove(os.path.join(self.folder_name, self.file_basename))
                     self.file = final_path
                 else:
                     raise Exception("No pafy/video object available")
@@ -615,7 +632,7 @@ class Song():
     # download a file from a url | returns file location
     def download_art(self, quiet=False):
         # Clean album name for filename
-        clean_album = self.album.replace(':','').replace('?','').replace(';','').replace('<','').replace('>','').replace('*','').replace('|','').replace('/','').replace('\\','').replace('"','').replace("'","'")
+        clean_album = self.album_folder
         filename = os.path.join(self.folder_name, clean_album + '.jpg')
 
         # check if file is already downloaded
@@ -662,7 +679,7 @@ class Song():
     def set_file_attributes(self, quiet=False):
         # Ensure we have the downloaded file path
         if not self.file:
-            self.file = os.path.join(self.folder_name, self.name_file + ".mp3")
+            self.file = os.path.join(self.folder_name, self.file_basename + ".mp3")
 
         # Check if file exists first
         if not os.path.exists(self.file):

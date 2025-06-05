@@ -11,7 +11,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from tqdm import tqdm
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
-from downloader_functions import *
+from src.core.downloader_functions import *
 from bs4 import BeautifulSoup
 
 parser = argparse.ArgumentParser(description="Download songs from a Spotify playlist")
@@ -21,7 +21,9 @@ parser.add_argument("--user-auth", action="store_true",
                     help="Authenticate via web browser instead of client credentials")
 args = parser.parse_args()
 
-shelveFile = shelve.open('spotify_data')
+# Get the project root directory
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+shelveFile = shelve.open(os.path.join(PROJECT_ROOT, 'spotify_data'))
 
 client_id = shelveFile.get('SPOTIPY_CLIENT_ID', os.environ.get('SPOTIPY_CLIENT_ID'))
 client_secret = shelveFile.get('SPOTIPY_CLIENT_SECRET', os.environ.get('SPOTIPY_CLIENT_SECRET'))
@@ -38,7 +40,7 @@ if args.user_auth:
                          client_secret=client_secret,
                          redirect_uri='http://127.0.0.1:8888/callback',
                          scope='playlist-read-private playlist-read-collaborative',
-                         cache_path='spotify_token_cache',
+                         cache_path=os.path.join(PROJECT_ROOT, 'spotify_token_cache'),
                          open_browser=True)
     token_info = oauth.get_cached_token()
     if not token_info:

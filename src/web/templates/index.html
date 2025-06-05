@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify Playlist Downloader</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .playlist-list {
+            margin: 20px 0;
+        }
+        .playlist-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .form-group {
+            margin: 20px 0;
+        }
+        input[type="text"] {
+            padding: 8px;
+            width: 300px;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #1DB954;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #1ed760;
+        }
+        .warning {
+            color: #ff4444;
+            padding: 10px;
+            background-color: #ffeeee;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Spotify Playlist Downloader</h1>
+    
+    {% if not has_credentials %}
+    <div class="warning">
+        Warning: Spotify credentials are not configured. Please add your Spotify client ID and secret to config.json.
+    </div>
+    {% endif %}
+
+    <div class="form-group">
+        <form action="/add" method="POST">
+            <input type="text" name="url" placeholder="Enter Spotify playlist URL" required>
+            <button type="submit">Add Playlist</button>
+        </form>
+    </div>
+
+    <div class="playlist-list">
+        <h2>Your Playlists</h2>
+        {% if playlists %}
+            {% for url in playlists %}
+            <div class="playlist-item">
+                <span>{{ url }}</span>
+                <form action="/delete" method="POST" style="display: inline;">
+                    <input type="hidden" name="url" value="{{ url }}">
+                    <button type="submit">Delete</button>
+                </form>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p>No playlists added yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="form-group">
+        <form action="/start" method="GET">
+            <button type="submit">Start Downloader</button>
+        </form>
+    </div>
+</body>
+</html> 

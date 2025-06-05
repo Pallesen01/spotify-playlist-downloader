@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spotify Playlist Downloader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <h1>Spotify Playlist Downloader</h1>
+    {% if not has_credentials %}
+    <div class="warning">
+        <p>⚠️ Spotify credentials not configured. Please add your Spotify client ID and secret to config.json</p>
+    </div>
+    {% endif %}
+    <form action="/add" method="post">
+        <input type="text" name="url" placeholder="Playlist URL" required>
+        <button type="submit">Add Playlist</button>
+    </form>
+    <h2>Tracked Playlists</h2>
+    <ul class="playlist-list">
+    {% for p in playlists %}
+        <li class="playlist-item">
+            <span class="playlist-url">{{ p }}</span>
+            <form action="/delete" method="post" style="margin: 0;">
+                <input type="hidden" name="url" value="{{ p }}">
+                <button type="submit" class="delete-btn">Delete</button>
+            </form>
+        </li>
+    {% endfor %}
+    </ul>
+    <a href="/start" class="start-btn">Start Downloader</a>
+</body>
+</html> 

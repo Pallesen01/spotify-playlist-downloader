@@ -1,4 +1,4 @@
-# Core dependencies for Spotify playlist downloader
+# Core dependencies
 spotipy>=2.22.1
 yt-dlp>=2023.1.6
 beautifulsoup4>=4.11.1

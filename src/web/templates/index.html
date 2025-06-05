@@ -21,6 +21,23 @@
             padding: 10px;
             border-bottom: 1px solid #eee;
         }
+        .playlist-info {
+            flex-grow: 1;
+            margin-right: 20px;
+        }
+        .playlist-name {
+            font-weight: bold;
+            color: #1DB954;
+            text-decoration: none;
+        }
+        .playlist-name:hover {
+            text-decoration: underline;
+        }
+        .track-count {
+            color: #666;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
         .form-group {
             margin: 20px 0;
         }
@@ -67,11 +84,14 @@
     <div class="playlist-list">
         <h2>Your Playlists</h2>
         {% if playlists %}
-            {% for url in playlists %}
+            {% for playlist in playlists %}
             <div class="playlist-item">
-                <span>{{ url }}</span>
+                <div class="playlist-info">
+                    <a href="{{ playlist.url }}" target="_blank" class="playlist-name">{{ playlist.name }}</a>
+                    <span class="track-count">{{ playlist.track_count }} tracks</span>
+                </div>
                 <form action="/delete" method="POST" style="display: inline;">
-                    <input type="hidden" name="url" value="{{ url }}">
+                    <input type="hidden" name="url" value="{{ playlist.url }}">
                     <button type="submit">Delete</button>
                 </form>
             </div>

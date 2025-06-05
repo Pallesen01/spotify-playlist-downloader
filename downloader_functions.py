@@ -16,10 +16,12 @@ def getTracks(playlist_url, sp):
 
         playlist_user = playlist_url.split('user/')[1].split('/')[0]
         playlist_id = playlist_url.split('playlist/')[1]
+        playlist_id = playlist_id.split('?', 1)[0]
 
     else:
         playlist_user = playlist_url.split(':')[0]
         playlist_id = playlist_url.split(':')[-1]
+        playlist_id = playlist_id.split('?', 1)[0]
     
     playlist = sp.user_playlist(playlist_user, playlist_id)
 

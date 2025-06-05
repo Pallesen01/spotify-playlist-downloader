@@ -26,3 +26,11 @@ To download only the first N songs, provide the `--limit` option:
 ```bash
 python playlist_downloader.py <playlist_url> --limit N
 ```
+
+If you prefer to authenticate through your web browser instead of providing a
+client ID and secret, add the `--user-auth` flag. A browser window will open so
+you can log into Spotify:
+
+```bash
+python playlist_downloader.py <playlist_url> --user-auth
+```

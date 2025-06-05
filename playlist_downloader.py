@@ -1,24 +1,59 @@
-import spotipy, os, urllib, pafy, shelve, threading, sys, argparse
+import spotipy
+import os
+import urllib
+import pafy
+import shelve
+import threading
+import sys
+import argparse
 from tqdm import tqdm
-from spotipy.oauth2 import SpotifyClientCredentials
+from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from downloader_functions import *
 from bs4 import BeautifulSoup
 
+parser = argparse.ArgumentParser(description="Download songs from a Spotify playlist")
+parser.add_argument("playlist_url", help="Spotify playlist URL or URI")
+parser.add_argument("--limit", "-l", type=int, help="Only download the first N songs", default=None)
+parser.add_argument("--user-auth", action="store_true",
+                    help="Authenticate via web browser instead of client credentials")
+args = parser.parse_args()
+
 shelveFile = shelve.open('spotify_data')
 
-try:
-    # spotify verification
-    client_credentials_manager = SpotifyClientCredentials(client_id=shelveFile['SPOTIPY_CLIENT_ID'],
-                                                        client_secret=shelveFile['SPOTIPY_CLIENT_SECRET'])
+client_id = shelveFile.get('SPOTIPY_CLIENT_ID', os.environ.get('SPOTIPY_CLIENT_ID'))
+client_secret = shelveFile.get('SPOTIPY_CLIENT_SECRET', os.environ.get('SPOTIPY_CLIENT_SECRET'))
 
-    sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
-except:
-    shelveFile['SPOTIPY_CLIENT_ID'] = input("Enter Client ID: ")
-    shelveFile['SPOTIPY_CLIENT_SECRET'] = input("Enter Client Secret: ")
-    client_credentials_manager = SpotifyClientCredentials(client_id=shelveFile['SPOTIPY_CLIENT_ID'],
-                                                        client_secret=shelveFile['SPOTIPY_CLIENT_SECRET'])
+if args.user_auth:
+    if not client_id:
+        client_id = input("Enter Client ID: ")
+        shelveFile['SPOTIPY_CLIENT_ID'] = client_id
+    if not client_secret:
+        client_secret = input("Enter Client Secret: ")
+        shelveFile['SPOTIPY_CLIENT_SECRET'] = client_secret
 
-    sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+    oauth = SpotifyOAuth(client_id=client_id,
+                         client_secret=client_secret,
+                         redirect_uri='http://localhost:8888/callback',
+                         scope='playlist-read-private playlist-read-collaborative',
+                         cache_path='spotify_token_cache',
+                         open_browser=True)
+    token_info = oauth.get_cached_token()
+    if not token_info:
+        token_info = oauth.get_access_token(as_dict=True)
+    sp = spotipy.Spotify(auth=token_info['access_token'])
+else:
+    try:
+        client_credentials_manager = SpotifyClientCredentials(client_id=client_id,
+                                                             client_secret=client_secret)
+        sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+    except Exception:
+        client_id = input("Enter Client ID: ")
+        client_secret = input("Enter Client Secret: ")
+        shelveFile['SPOTIPY_CLIENT_ID'] = client_id
+        shelveFile['SPOTIPY_CLIENT_SECRET'] = client_secret
+        client_credentials_manager = SpotifyClientCredentials(client_id=client_id,
+                                                             client_secret=client_secret)
+        sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
 shelveFile.close()
 
@@ -28,11 +63,6 @@ shelveFile.close()
 #set variables
 threadList = []  # stores all threads
 downloadQueue = []  # songs to be downloaded
-
-parser = argparse.ArgumentParser(description="Download songs from a Spotify playlist")
-parser.add_argument("playlist_url", help="Spotify playlist URL or URI")
-parser.add_argument("--limit", "-l", type=int, help="Only download the first N songs", default=None)
-args = parser.parse_args()
 
 playlist_url = args.playlist_url
 limit = args.limit

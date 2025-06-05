@@ -4,13 +4,18 @@ if not exist "%USERPROFILE%\Desktop\Music" mkdir "%USERPROFILE%\Desktop\Music"
 
 :: Install required dependencies
 echo Installing dependencies...
-pip install spotipy yt-dlp pafy beautifulsoup4 pytube eyed3 requests >nul 2>&1
+pip install -r "%~dp0requirements.txt" >nul 2>&1
+
+:: Install optional high-quality providers (ignore errors if they fail)
+echo Installing optional providers...
+pip install qobuz-dl >nul 2>&1
 
 :: Check if ffmpeg is installed, install if not found
 ffmpeg -version >nul 2>&1
 if errorlevel 1 (
     echo Installing ffmpeg...
     winget install --id=Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements >nul 2>&1
+    echo FFmpeg installed. You may need to restart your terminal for it to work.
 )
 
 :: Set pafy to use internal backend instead of youtube-dl

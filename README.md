@@ -1,8 +1,11 @@
 # spotify-playlist-downloader
-Downloads all songs in a Spotify playlist from YouTube.
+Downloads songs in a Spotify playlist. The downloader now attempts to grab
+lossless audio from Qobuz when credentials are provided and falls back to
+YouTube otherwise.
 
 # Required Modules
-spotipy, sys, os, urllib, requests, threading, subprocess, eyed3, youtube_dl, pafy, bs4, pytube, tqdm
+spotipy, sys, os, urllib, requests, threading, subprocess, eyed3, youtube_dl,
+pafy, bs4, pytube, tqdm, qobuz-dl
 
 ## Improvements
 The YouTube search logic now scores results using fuzzy title matching and
@@ -20,6 +23,33 @@ Run `playlist_downloader.py` with the playlist URL:
 ```bash
 python playlist_downloader.py <playlist_url>
 ```
+
+If you have a Qobuz account and wish to download lossless audio, set the
+following environment variables before running the script:
+
+```
+export QOBUZ_EMAIL="your-email"
+export QOBUZ_PASSWORD="your-password"
+export QOBUZ_APP_ID="your-app-id"
+export QOBUZ_SECRETS="secret1,secret2,..."
+```
+
+When these are provided the downloader will attempt to fetch FLAC files from
+Qobuz. You can optionally set a Jamendo API client ID to enable downloads from
+Jamendo as well:
+
+```
+export JAMENDO_CLIENT_ID="your-client-id"
+```
+
+The downloader attempts the following sources in order of quality:
+1. Qobuz (lossless when available)
+2. Bandcamp
+3. SoundCloud
+4. Jamendo
+5. YouTube
+
+If all high quality sources fail, it falls back to YouTube as before.
 
 To download only the first N songs, provide the `--limit` option:
 

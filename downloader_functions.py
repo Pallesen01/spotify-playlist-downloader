@@ -12,6 +12,219 @@ except ImportError:
     pafy = None
     print("Warning: pafy not available, using yt-dlp only")
 
+# Attempt high quality downloads from Qobuz if credentials are provided
+def download_from_qobuz(song, quiet=False):
+    """Download a song from Qobuz if possible.
+
+    This function requires the environment variables ``QOBUZ_EMAIL``,
+    ``QOBUZ_PASSWORD``, ``QOBUZ_APP_ID`` and ``QOBUZ_SECRETS`` (comma separated
+    secrets). If any of these are missing or the download fails, ``False`` is
+    returned so the caller can fall back to the usual YouTube method.
+    """
+
+    q_email = os.getenv("QOBUZ_EMAIL")
+    q_pass = os.getenv("QOBUZ_PASSWORD")
+    q_app_id = os.getenv("QOBUZ_APP_ID")
+    q_secrets = os.getenv("QOBUZ_SECRETS")
+
+    if not all([q_email, q_pass, q_app_id, q_secrets]):
+        return False
+
+    try:
+        from qobuz_dl.qopy import Client
+    except Exception:
+        return False
+
+    try:
+        secrets = [s for s in q_secrets.split(',') if s]
+        client = Client(q_email, q_pass, q_app_id, secrets)
+        query = f"{song.name} {song.artists[0]}"
+        res = client.search_tracks(query, limit=1)
+        items = res.get('tracks', {}).get('items', [])
+        if not items:
+            return False
+
+        track_id = items[0]['id']
+
+        # Try hi-res >96kHz then <96kHz then lossless
+        fmt_ids = [27, 7, 6]
+        track_data = None
+        for fmt in fmt_ids:
+            try:
+                track_data = client.get_track_url(track_id, fmt_id=fmt)
+                if 'url' in track_data:
+                    break
+            except Exception:
+                track_data = None
+        if not track_data or 'url' not in track_data:
+            # Fallback to 320k mp3
+            track_data = client.get_track_url(track_id, fmt_id=5)
+
+        url = track_data.get('url')
+        if not url:
+            return False
+
+        bitrate = track_data.get('bitrate', 0)
+        bit_depth = track_data.get('bit_depth')
+        ext = '.flac' if (bit_depth and bitrate and bitrate > 320000) else '.mp3'
+
+        os.makedirs(song.folder_name, exist_ok=True)
+        fname = os.path.join(song.folder_name, song.name_file + ext)
+
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(fname, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+        song.file = fname
+        return True
+    except Exception as e:
+        if not quiet:
+            print(f"Qobuz download failed for {song.name}: {e}")
+        return False
+
+def get_audio_bitrate(file_path):
+    """Return the bitrate of the audio stream in bits per second or None."""
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+                '-show_entries', 'stream=bit_rate',
+                '-of', 'default=noprint_wrappers=1:nokey=1', file_path
+            ],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip())
+    except Exception:
+        pass
+    return None
+
+def adjust_audio_format(file_path, quiet=False):
+    """Convert the downloaded file to flac or mp3 based on bitrate."""
+    bitrate = get_audio_bitrate(file_path)
+    ext = os.path.splitext(file_path)[1].lower()
+    try:
+        if bitrate and bitrate > 320000:
+            if ext != '.flac':
+                new_path = os.path.splitext(file_path)[0] + '.flac'
+                FNULL = open(os.devnull, 'w')
+                subprocess.call(['ffmpeg', '-y', '-i', file_path, new_path],
+                                stdout=FNULL, stderr=subprocess.STDOUT)
+                os.remove(file_path)
+                return new_path
+        else:
+            if ext != '.mp3':
+                new_path = os.path.splitext(file_path)[0] + '.mp3'
+                FNULL = open(os.devnull, 'w')
+                subprocess.call(['ffmpeg', '-y', '-i', file_path, new_path],
+                                stdout=FNULL, stderr=subprocess.STDOUT)
+                os.remove(file_path)
+                return new_path
+    except Exception:
+        if not quiet:
+            print(f"Format adjustment failed for {file_path}")
+    return file_path
+
+def download_from_bandcamp(song, quiet=False):
+    """Attempt to download from Bandcamp using yt-dlp."""
+    try:
+        query = urllib.parse.quote(f"{song.name} {song.artists[0]}")
+        search_url = f"https://bandcamp.com/search?q={query}"
+        res = requests.get(search_url, timeout=15)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, 'html.parser')
+        link_tag = soup.select_one('li.searchresult a.itemurl')
+        if not link_tag or not link_tag.get('href'):
+            return False
+        url = link_tag['href']
+
+        os.makedirs(song.folder_name, exist_ok=True)
+        output_path = os.path.join(song.folder_name, song.name_file + '.%(ext)s')
+        cmd = [
+            'yt-dlp', '--extract-audio', '--audio-format', 'best',
+            '--audio-quality', '0', '--output', output_path, url
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            return False
+        for f in os.listdir(song.folder_name):
+            if f.startswith(song.name_file):
+                song.file = os.path.join(song.folder_name, f)
+                break
+        if not song.file:
+            return False
+        song.file = adjust_audio_format(song.file, quiet=quiet)
+        return True
+    except Exception as e:
+        if not quiet:
+            print(f"Bandcamp download failed for {song.name}: {e}")
+        return False
+
+def download_from_soundcloud(song, quiet=False):
+    """Download audio from SoundCloud via yt-dlp search."""
+    try:
+        query = f"{song.name} {song.artists[0]}"
+        os.makedirs(song.folder_name, exist_ok=True)
+        output_path = os.path.join(song.folder_name, song.name_file + '.%(ext)s')
+        cmd = [
+            'yt-dlp', '--extract-audio', '--audio-format', 'best',
+            '--audio-quality', '0', '--output', output_path,
+            f'scsearch1:{query}'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            return False
+        for f in os.listdir(song.folder_name):
+            if f.startswith(song.name_file):
+                song.file = os.path.join(song.folder_name, f)
+                break
+        if not song.file:
+            return False
+        song.file = adjust_audio_format(song.file, quiet=quiet)
+        return True
+    except Exception as e:
+        if not quiet:
+            print(f"SoundCloud download failed for {song.name}: {e}")
+        return False
+
+def download_from_jamendo(song, quiet=False):
+    """Download from Jamendo using its open API."""
+    client_id = os.getenv('JAMENDO_CLIENT_ID')
+    if not client_id:
+        return False
+    try:
+        query = urllib.parse.quote(f"{song.name} {song.artists[0]}")
+        api_url = (
+            f"https://api.jamendo.com/v3.0/tracks/?client_id={client_id}&format=json"
+            f"&limit=1&search={query}"
+        )
+        res = requests.get(api_url, timeout=15)
+        res.raise_for_status()
+        data = res.json()
+        tracks = data.get('results')
+        if not tracks:
+            return False
+        url = tracks[0].get('audiodownload') or tracks[0].get('audio')
+        if not url:
+            return False
+        os.makedirs(song.folder_name, exist_ok=True)
+        fname = os.path.join(song.folder_name, song.name_file + '.mp3')
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(fname, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+        song.file = adjust_audio_format(fname, quiet=quiet)
+        return True
+    except Exception as e:
+        if not quiet:
+            print(f"Jamendo download failed for {song.name}: {e}")
+        return False
+
 #download a song using song object
 def downloadSong(song, quiet=False):
     if not quiet:
@@ -262,10 +475,20 @@ class Song():
 
     def download(self, quiet=False):
         import subprocess
-        
+
+        # Try high quality download sources in order
+        if download_from_qobuz(self, quiet=quiet):
+            return
+        if download_from_bandcamp(self, quiet=quiet):
+            return
+        if download_from_soundcloud(self, quiet=quiet):
+            return
+        if download_from_jamendo(self, quiet=quiet):
+            return
+
         self.get_link(quiet=quiet)
         os.makedirs(self.folder_name, exist_ok=True)
-        
+
         output_path = os.path.join(self.folder_name, self.name_file + ".%(ext)s")
         final_path = os.path.join(self.folder_name, self.name_file + ".mp3")
         
@@ -332,11 +555,13 @@ class Song():
 
     # download a file from a url | returns file location
     def download_art(self, quiet=False):
-        filename = os.path.join(self.folder_name, self.album + '.jpg')
+        # Clean album name for filename
+        clean_album = self.album.replace(':','').replace('?','').replace(';','').replace('<','').replace('>','').replace('*','').replace('|','').replace('/','').replace('\\','').replace('"','').replace("'","'")
+        filename = os.path.join(self.folder_name, clean_album + '.jpg')
 
         # check if file is already downloaded
         for file in os.listdir(self.folder_name):
-            if self.album + '.jpg' == file:
+            if clean_album + '.jpg' == file:
                 return filename
                 
         if not quiet:
@@ -344,41 +569,41 @@ class Song():
         try:
             res = requests.get(self.art_urls[0])
             res.raise_for_status()
+            
+            # Create a safe temporary filename
+            import tempfile
+            temp_filename = os.path.join(self.folder_name, f"temp_art_{hash(self.art_urls[0]) % 10000}.jpg")
                 
-            # Save the file to file location
-            file = open(os.path.join(self.folder_name, os.path.basename(self.art_urls[0])), 'wb')
-            for chunk in res.iter_content(100000):
-                file.write(chunk)
-            file.close()
+            # Save the file to temp location first
+            with open(temp_filename, 'wb') as file:
+                for chunk in res.iter_content(100000):
+                    file.write(chunk)
+            
+            # Rename to final filename
+            try:
+                if os.path.exists(filename):
+                    os.remove(filename)
+                os.rename(temp_filename, filename)
+            except Exception as e:
+                if not quiet:
+                    print(f"Error renaming art file: {e}")
+                # If rename fails, just use the temp file
+                filename = temp_filename
+                
         except requests.exceptions.MissingSchema:
-            print('Error requests.exceptions.MissingSchema')
-
-        except FileExistsError:
-            pass
-
-        #find then rename file to filename specified
-        for file in os.listdir(self.folder_name):
-            if file == self.art_urls[0].split('/')[-1]:
-                try:
-                    #print(file)
-                    #print(os.path.join(self.folder_name, file))
-                    #print(filename)
-                    try:
-                        os.rename(os.path.join(self.folder_name, file),filename)
-                    except:
-                        pass
-
-                except FileExistsError:
-                    pass
-
-                return filename
+            if not quiet:
+                print('Error requests.exceptions.MissingSchema')
+        except Exception as e:
+            if not quiet:
+                print(f"Error downloading album art: {e}")
 
         return filename
 
     # assigns id3 attributes to mp3 file
     def set_file_attributes(self, quiet=False):
-        #TEMP SET VAR
-        self.file = os.path.join(self.folder_name, self.name_file)+".mp3"
+        # Ensure we have the downloaded file path
+        if not self.file:
+            self.file = os.path.join(self.folder_name, self.name_file + ".mp3")
 
         # Check if file exists first
         if not os.path.exists(self.file):

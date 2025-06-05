@@ -69,9 +69,15 @@ for song in songs:
 progress_bar = tqdm(total=len(songs), desc="Processing Songs", unit="song", 
                    bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
 
-# Update progress for already downloaded songs
+# Update progress for already downloaded songs (without affecting rate calculation)
 already_downloaded = len(songs) - len(downloadQueue)
-progress_bar.update(already_downloaded)
+if already_downloaded > 0:
+    # Set initial progress without starting the timer
+    progress_bar.n = already_downloaded
+    progress_bar.refresh()
+
+# Flag to track when downloads actually start
+downloads_started = False
 
 # Track currently downloading songs
 import threading
@@ -79,6 +85,8 @@ downloading_lock = threading.Lock()
 currently_downloading = []
 
 def thread_download(song):
+    global downloads_started
+    
     with downloading_lock:
         currently_downloading.append(song.name)
         # Update progress bar description with current downloads
@@ -86,6 +94,11 @@ def thread_download(song):
         if len(currently_downloading) > 3:
             current_desc += f" (+{len(currently_downloading)-3} more)"
         progress_bar.set_description(current_desc)
+        
+        # Start the timer on first actual download
+        if not downloads_started:
+            downloads_started = True
+            progress_bar.start_t = progress_bar._time()
     
     downloadSong(song, quiet=True)
     

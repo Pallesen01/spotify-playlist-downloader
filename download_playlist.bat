@@ -23,5 +23,5 @@ cd "%USERPROFILE%\Desktop\Music"
 set playlistlink=https://open.spotify.com/playlist/6kVbhdK2ymPGUUXzXfZXvh?si=6cb919d48ea640bd
 
 echo Downloading Playlist...
-python "%~dp0playlist_downloader.py" %playlistlink% --user-auth
+python "%~dp0playlist_downloader.py" %playlistlink%
 PAUSE

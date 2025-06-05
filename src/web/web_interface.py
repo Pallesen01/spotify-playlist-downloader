@@ -44,7 +44,8 @@ def downloader_loop():
         for url in playlists:
             # Add project root to Python path
             sys.path.insert(0, PROJECT_ROOT)
-            subprocess.run([sys.executable, os.path.join(PROJECT_ROOT, 'src', 'core', 'playlist_downloader.py'), url])
+            # Run as module instead of script
+            subprocess.run([sys.executable, '-m', 'src.core.playlist_downloader', url])
         time.sleep(INTERVAL)
 
 @app.route('/')

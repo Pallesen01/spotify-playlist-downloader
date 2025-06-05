@@ -1,91 +1,88 @@
-import spotipy, os, urllib, pafy, shelve, threading, sys
-from spotipy.oauth2 import SpotifyClientCredentials
-from downloader_functions import *
+import asyncio
+import os
+import shelve
+import sys
+import urllib
+
+import pafy
+import spotipy
 from bs4 import BeautifulSoup
+from spotipy.oauth2 import SpotifyClientCredentials
 
-shelveFile = shelve.open('spotify_data')
-
-try:
-    # spotify verification
-    client_credentials_manager = SpotifyClientCredentials(client_id=shelveFile['SPOTIPY_CLIENT_ID'],
-                                                        client_secret=shelveFile['SPOTIPY_CLIENT_SECRET'])
-
-    sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
-except:
-    shelveFile['SPOTIPY_CLIENT_ID'] = input("Enter Client ID: ")
-    shelveFile['SPOTIPY_CLIENT_SECRET'] = input("Enter Client Secret: ")
-    client_credentials_manager = SpotifyClientCredentials(client_id=shelveFile['SPOTIPY_CLIENT_ID'],
-                                                        client_secret=shelveFile['SPOTIPY_CLIENT_SECRET'])
-
-    sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
-
-shelveFile.close()
-
-#TEMP Test Link
-#test_link = "https://open.spotify.com/user/sparks_of_fire/playlist/4ScHDVxjzDpBFOyyKdWw6G?si=R_AFDhOJTYymeBpjs96jhw"
-
-#set variables
-threadList = [] # stores all threads
-downloadQueue = [] #songs to be downloaded
-
-try:
-    playlist_url = sys.argv[1]
-except IndexError:
-    print("Error - no playlist link found")
-    print("Usage: python playlist_downloader.py <playlist_url>")
-    sys.exit(1)
-
-print("Getting all songs from playlist...")
-songs, folder_name = getTracks(playlist_url, sp)
-os.makedirs(folder_name, exist_ok=True)
-
-print("Getting already downloaded songs...")
-#get URIs of downloaded songs
-URIs = []
-playlistFolderURIs = []
-for file in os.listdir(folder_name):
-    playlistFolderURIs.append(getUri(os.path.join(folder_name, file)))
+from downloader_functions import downloadSong, getTracks, getUri, deleteAllImages, delRemoved
 
 
-#Don't download dupe songs from other folders
-URIs.extend(playlistFolderURIs)
+async def download_worker(song, semaphore, loop):
+    """Asynchronously download a single song using a thread executor."""
+    async with semaphore:
+        await loop.run_in_executor(None, downloadSong, song)
 
-for folder in os.listdir():
-    if folder == folder_name:
-        pass
+
+async def main():
+    shelveFile = shelve.open('spotify_data')
     try:
-        for file in os.listdir(folder):
-            URIs.append(getUri(os.path.join(folder, file)))
-    except NotADirectoryError:
-        pass
+        client_credentials_manager = SpotifyClientCredentials(
+            client_id=shelveFile['SPOTIPY_CLIENT_ID'],
+            client_secret=shelveFile['SPOTIPY_CLIENT_SECRET'],
+        )
+        sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+    except Exception:
+        shelveFile['SPOTIPY_CLIENT_ID'] = input("Enter Client ID: ")
+        shelveFile['SPOTIPY_CLIENT_SECRET'] = input("Enter Client Secret: ")
+        client_credentials_manager = SpotifyClientCredentials(
+            client_id=shelveFile['SPOTIPY_CLIENT_ID'],
+            client_secret=shelveFile['SPOTIPY_CLIENT_SECRET'],
+        )
+        sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+    shelveFile.close()
 
-for song in songs:
-    if song.uri in URIs:
-        print(song.name, "already downloaded")
+    try:
+        playlist_url = sys.argv[1]
+    except IndexError:
+        print("Error - no playlist link found")
+        print("Usage: python playlist_downloader.py <playlist_url>")
+        sys.exit(1)
 
-    else:
-        downloadQueue.append(song)
+    print("Getting all songs from playlist...")
+    songs, folder_name = getTracks(playlist_url, sp)
+    os.makedirs(folder_name, exist_ok=True)
 
-#While there are songs in download queue download songs
-while len(downloadQueue) > 0:
-    if len(threadList) <= 4:
-        threadObj = threading.Thread(target=downloadSong, args=[downloadQueue.pop(0)])
-        threadObj.handled = False
-        threadList.append(threadObj)
-        threadObj.start()
+    print("Getting already downloaded songs...")
+    URIs = []
+    playlistFolderURIs = []
+    for file in os.listdir(folder_name):
+        playlistFolderURIs.append(getUri(os.path.join(folder_name, file)))
 
-    for t in threadList:
-        if not t.isAlive():
-            #print("Thread Done")
-            t.handled = True
-    threadList = [t for t in threadList if not t.handled]
+    URIs.extend(playlistFolderURIs)
 
-#Wait for all thread to finish
-for t in threadList:
-    t.join()
+    for folder in os.listdir():
+        if folder == folder_name:
+            continue
+        try:
+            for file in os.listdir(folder):
+                URIs.append(getUri(os.path.join(folder, file)))
+        except NotADirectoryError:
+            pass
 
-print("Deleting images")
-deleteAllImages(folder_name)
-print("Deleting Removed Songs")
-delRemoved(playlistFolderURIs, songs, folder_name)
-print("Done")
+    downloadQueue = []
+    for song in songs:
+        if song.uri in URIs:
+            print(song.name, "already downloaded")
+        else:
+            downloadQueue.append(song)
+
+    semaphore = asyncio.Semaphore(4)
+    loop = asyncio.get_event_loop()
+    tasks = [download_worker(song, semaphore, loop) for song in downloadQueue]
+    if tasks:
+        await asyncio.gather(*tasks)
+
+    print("Deleting images")
+    deleteAllImages(folder_name)
+    print("Deleting Removed Songs")
+    delRemoved(playlistFolderURIs, songs, folder_name)
+    print("Done")
+
+
+if __name__ == '__main__':
+    asyncio.run(main())

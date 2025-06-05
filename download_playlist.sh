@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Set pafy to use internal backend instead of youtube-dl (must be set before installing)
+export PAFY_BACKEND=internal
+
 # Install required dependencies
 echo "Installing dependencies..."
 pip install spotipy yt-dlp pafy beautifulsoup4 pytube eyed3 requests > /dev/null 2>&1
@@ -20,9 +23,6 @@ if ! command -v ffmpeg &> /dev/null; then
         echo "Please install ffmpeg manually for your system"
     fi
 fi
-
-# Set pafy to use internal backend instead of youtube-dl
-export PAFY_BACKEND=internal
 
 # Set playlist URL
 playlistlink="https://open.spotify.com/playlist/6kVbhdK2ymPGUUXzXfZXvh?si=6cb919d48ea640bd"

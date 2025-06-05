@@ -142,8 +142,6 @@ for t in threadList:
 progress_bar.set_description("Finalizing...")
 progress_bar.close()
 
-print("Deleting images")
-deleteAllImages(folder_name)
 print("Deleting Removed Songs")
 delRemoved(playlistFolderURIs, songs, folder_name)
 print("Done")

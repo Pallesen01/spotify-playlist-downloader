@@ -25,6 +25,7 @@ def downloadSong(song, quiet=False):
                 os.remove(song.art)
             except FileNotFoundError:
                 pass
+            song.art = None
         if not quiet:
             print(song.name, "Downloaded")
     else:

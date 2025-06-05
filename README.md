@@ -10,7 +10,8 @@ duration similarity which helps select the official or most accurate audio
 track for each song.
 
 Album artwork is deleted immediately after each song is downloaded and tagged
-so that images are not left behind after the metadata is applied.
+so that images are not left behind after the metadata is applied. Because the
+cleanup happens per track, there is no longer a final image deletion step.
 
 ## Usage
 

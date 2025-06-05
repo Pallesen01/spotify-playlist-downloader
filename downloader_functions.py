@@ -1,6 +1,7 @@
-import urllib, os, spotipy, subprocess, eyed3, requests
+import urllib, os, spotipy, subprocess, eyed3, requests, json
 from bs4 import BeautifulSoup
 from pytube import YouTube
+from mutagen.flac import FLAC
 
 # Set pafy backend before importing
 import os as os_env
@@ -255,73 +256,111 @@ class Song():
 
     def download(self, quiet=False):
         import subprocess
-        
+
         self.get_link(quiet=quiet)
         os.makedirs(self.folder_name, exist_ok=True)
-        
+
         output_path = os.path.join(self.folder_name, self.name_file + ".%(ext)s")
-        final_path = os.path.join(self.folder_name, self.name_file + ".mp3")
-        
+        flac_path = os.path.join(self.folder_name, self.name_file + ".flac")
+        mp3_path = os.path.join(self.folder_name, self.name_file + ".mp3")
+
         try:
-            # Use yt-dlp to download directly as mp3
-            download_cmd = [
-                'yt-dlp',
-                '--extract-audio',
-                '--audio-format', 'mp3',
-                '--audio-quality', '0',  # best quality
-                '--output', output_path,
+            # Attempt high fidelity download first
+            info_cmd = [
+                'yt-dlp', '-f', 'bestaudio', '--no-warnings', '--skip-download', '--print-json',
                 self.closesturl
             ]
-            
-            result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
-            
+            info_res = subprocess.run(info_cmd, capture_output=True, text=True, timeout=30)
+            abr = 0
+            ext = None
+            if info_res.returncode == 0 and info_res.stdout:
+                try:
+                    info = json.loads(info_res.stdout.splitlines()[0])
+                    abr = info.get('abr', 0)
+                    ext = info.get('ext')
+                except json.JSONDecodeError:
+                    pass
+
+            dl_cmd = ['yt-dlp', '-f', 'bestaudio', '-o', output_path, self.closesturl]
+            result = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=300)
             if result.returncode != 0:
-                if not quiet:
-                    print(f"Primary download failed for {self.name}, trying backup...")
-                # Try backup URL
-                download_cmd[-1] = self.backupvid
-                result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
-                
-                if result.returncode != 0:
-                    raise Exception(f"Both downloads failed: {result.stderr}")
-            
-            # Find the actual downloaded file (yt-dlp might change the extension)
-            for file in os.listdir(self.folder_name):
-                if file.startswith(self.name_file) and file.endswith('.mp3'):
-                    self.file = os.path.join(self.folder_name, file)
-                    break
+                raise Exception(result.stderr)
+
+            if ext:
+                downloaded_file = output_path.replace('%(ext)s', ext)
             else:
-                # If no mp3 found, look for any file with our name and rename it
-                for file in os.listdir(self.folder_name):
-                    if file.startswith(self.name_file):
-                        old_path = os.path.join(self.folder_name, file)
-                        os.rename(old_path, final_path)
-                        self.file = final_path
+                downloaded_file = None
+
+            if not downloaded_file or not os.path.exists(downloaded_file):
+                for f in os.listdir(self.folder_name):
+                    if f.startswith(self.name_file):
+                        downloaded_file = os.path.join(self.folder_name, f)
                         break
-                else:
-                    self.file = final_path
-                    
+
+            if not downloaded_file or not os.path.exists(downloaded_file):
+                raise Exception('Downloaded file not found')
+
+            FNULL = open(os.devnull, 'w')
+            if abr and abr > 320:
+                convert_cmd = ['ffmpeg', '-y', '-i', downloaded_file, '-vn', '-acodec', 'flac', flac_path]
+                subprocess.run(convert_cmd, stdout=FNULL, stderr=FNULL)
+                os.remove(downloaded_file)
+                self.file = flac_path
+            else:
+                convert_cmd = ['ffmpeg', '-y', '-i', downloaded_file, '-vn', '-acodec', 'libmp3lame', '-ab', '320k', mp3_path]
+                subprocess.run(convert_cmd, stdout=FNULL, stderr=FNULL)
+                os.remove(downloaded_file)
+                self.file = mp3_path
+
         except Exception as e:
             if not quiet:
-                print(f"yt-dlp failed for {self.name}: {e}")
-            # Fallback to old method
+                print(f"High fidelity method failed for {self.name}: {e}")
+            # Fallback to previous implementation
             try:
-                if self.video and pafy:
-                    self.video.getbestaudio().download(filepath=os.path.join(self.folder_name, self.name_file))
-                    
-                    FNULL = open(os.devnull, 'w')
+                download_cmd = [
+                    'yt-dlp',
+                    '--extract-audio',
+                    '--audio-format', 'mp3',
+                    '--audio-quality', '0',
+                    '--output', output_path,
+                    self.closesturl
+                ]
+
+                result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
+
+                if result.returncode != 0:
                     if not quiet:
-                        print("Converting", self.name)
-                    subprocess.call("ffmpeg -i \"" + os.path.join(self.folder_name, self.name_file)+"\" " + "\""+ final_path +"\"", stdout=FNULL, stderr=subprocess.STDOUT)
-                    os.remove(os.path.join(self.folder_name, self.name_file))
-                    self.file = final_path
+                        print(f"Primary download failed for {self.name}, trying backup...")
+                    download_cmd[-1] = self.backupvid
+                    result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
+                    if result.returncode != 0:
+                        raise Exception(result.stderr)
+
+                for file in os.listdir(self.folder_name):
+                    if file.startswith(self.name_file) and file.endswith('.mp3'):
+                        self.file = os.path.join(self.folder_name, file)
+                        break
                 else:
-                    raise Exception("No pafy/video object available")
-                    
+                    self.file = mp3_path
+
             except Exception as e2:
                 if not quiet:
                     print(f"All download methods failed for {self.name}: {e2}")
-                self.file = None
+                try:
+                    if self.video and pafy:
+                        self.video.getbestaudio().download(filepath=os.path.join(self.folder_name, self.name_file))
+                        FNULL = open(os.devnull, 'w')
+                        if not quiet:
+                            print("Converting", self.name)
+                        subprocess.call("ffmpeg -i \"" + os.path.join(self.folder_name, self.name_file)+"\" \""+ mp3_path +"\"", stdout=FNULL, stderr=subprocess.STDOUT)
+                        os.remove(os.path.join(self.folder_name, self.name_file))
+                        self.file = mp3_path
+                    else:
+                        raise Exception("No pafy/video object available")
+                except Exception as e3:
+                    if not quiet:
+                        print(f"All download methods failed for {self.name}: {e3}")
+                    self.file = None
 
     # download a file from a url | returns file location
     def download_art(self, quiet=False):
@@ -370,8 +409,7 @@ class Song():
 
     # assigns id3 attributes to mp3 file
     def set_file_attributes(self, quiet=False):
-        #TEMP SET VAR
-        self.file = os.path.join(self.folder_name, self.name_file)+".mp3"
+        ext = os.path.splitext(self.file)[1].lower()
 
         # Check if file exists first
         if not os.path.exists(self.file):
@@ -380,15 +418,15 @@ class Song():
             return
 
         try:
-            audiofile = eyed3.load(self.file)
-            
-            # Check if eyed3 successfully loaded the file
-            if audiofile is None or audiofile.tag is None:
-                if not quiet:
-                    print(f"Cannot set attributes: {self.file} is not a valid audio file")
-                return
-
-        except TypeError as e:
+            if ext == '.flac':
+                audiofile = FLAC(self.file)
+            else:
+                audiofile = eyed3.load(self.file)
+                if audiofile is None or audiofile.tag is None:
+                    if not quiet:
+                        print(f"Cannot set attributes: {self.file} is not a valid audio file")
+                    return
+        except Exception as e:
             if not quiet:
                 print("Error loading song for setting attributes")
                 print(e)
@@ -401,15 +439,31 @@ class Song():
                 if not quiet:
                     print("Error setting art for", self.name)
                     print(Exception)
-            audiofile.tag.artist = ', '.join(self.artists)
-            audiofile.tag.album = self.album
-            audiofile.tag.title = self.name
-            audiofile.tag.publisher = self.uri
-            try:
-                audiofile.tag.images.set(3, open(self.art,'rb').read(), 'image/jpeg')
-            except:
-                pass
-            audiofile.tag.save(self.file)
+            if ext == '.flac':
+                from mutagen.flac import Picture
+                audiofile['artist'] = ', '.join(self.artists)
+                audiofile['album'] = self.album
+                audiofile['title'] = self.name
+                audiofile['publisher'] = self.uri
+                try:
+                    pic = Picture()
+                    pic.type = 3
+                    pic.mime = 'image/jpeg'
+                    pic.data = open(self.art, 'rb').read()
+                    audiofile.add_picture(pic)
+                except Exception:
+                    pass
+                audiofile.save()
+            else:
+                audiofile.tag.artist = ', '.join(self.artists)
+                audiofile.tag.album = self.album
+                audiofile.tag.title = self.name
+                audiofile.tag.publisher = self.uri
+                try:
+                    audiofile.tag.images.set(3, open(self.art,'rb').read(), 'image/jpeg')
+                except:
+                    pass
+                audiofile.tag.save(self.file)
 
         except AttributeError as e:
             if not quiet:

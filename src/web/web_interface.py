@@ -42,6 +42,8 @@ def downloader_loop():
     while True:
         playlists = load_playlists()
         for url in playlists:
+            # Add project root to Python path
+            sys.path.insert(0, PROJECT_ROOT)
             subprocess.run([sys.executable, os.path.join(PROJECT_ROOT, 'src', 'core', 'playlist_downloader.py'), url])
         time.sleep(INTERVAL)
 

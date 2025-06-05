@@ -11,7 +11,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from tqdm import tqdm
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
-from src.core.downloader_functions import *
+from .downloader_functions import *
 from bs4 import BeautifulSoup
 
 parser = argparse.ArgumentParser(description="Download songs from a Spotify playlist")

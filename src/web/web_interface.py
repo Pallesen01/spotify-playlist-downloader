@@ -4,7 +4,7 @@ import threading
 import time
 import subprocess
 import sys
-from flask import Flask, request, redirect, render_template
+from flask import Flask, request, redirect, render_template, jsonify
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
@@ -15,6 +15,21 @@ CONFIG_FILE = os.path.join(PROJECT_ROOT, 'config.json')
 INTERVAL = 3600  # 1 hour
 
 app = Flask(__name__)
+
+# Global variables for downloader state
+downloader_thread = None
+downloader_running = False
+current_progress = {
+    'status': 'idle',  # idle, running, completed, error
+    'current_playlist': None,
+    'current_song': None,
+    'total_songs': 0,
+    'downloaded_songs': 0,
+    'error': None,
+    'stage': 'Idle.'
+}
+# Add a global for the current subprocess
+current_downloader_process = None
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -69,24 +84,144 @@ def get_playlist_info(url):
     except Exception:
         return None
 
-downloader_thread = None
-
 def downloader_loop():
-    while True:
-        playlists = load_playlists()
-        for playlist in playlists:
-            # Add project root to Python path
-            sys.path.insert(0, PROJECT_ROOT)
-            # Run as module instead of script
-            subprocess.run([sys.executable, '-m', 'src.core.playlist_downloader', playlist['url']])
-        time.sleep(INTERVAL)
+    global downloader_running, current_progress, current_downloader_process
+    while downloader_running:
+        try:
+            playlists = load_playlists()
+            for playlist in playlists:
+                if not downloader_running:
+                    break
+                current_progress['current_playlist'] = playlist['name']
+                current_progress['status'] = 'running'
+                current_progress['downloaded_songs'] = 0
+                current_progress['total_songs'] = 0
+                current_progress['stage'] = 'Initializing...'
+
+                sys.path.insert(0, PROJECT_ROOT)
+
+                # Start the downloader subprocess and store it globally
+                process = subprocess.Popen(
+                    [sys.executable, '-m', 'src.core.playlist_downloader', playlist['url']],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True,
+                    env={**os.environ, 'PYTHONUNBUFFERED': '1'}
+                )
+                current_downloader_process = process
+
+                # Read output line by line
+                while True:
+                    stdout_line = process.stdout.readline()
+                    stderr_line = process.stderr.readline()
+
+                    if not downloader_running:
+                        # If stopped, terminate the process
+                        if process.poll() is None:
+                            process.terminate()
+                        break
+
+                    if process.poll() is not None:
+                        remaining_stdout, remaining_stderr = process.communicate()
+                        if remaining_stdout:
+                            print(f"Debug - Remaining stdout: {remaining_stdout}")
+                        if remaining_stderr:
+                            print(f"Debug - Remaining stderr: {remaining_stderr}")
+                        break
+
+                    # Process stdout
+                    if stdout_line:
+                        line = stdout_line.strip()
+                        print(f"Debug - Stdout: {line}")
+                        if 'Found' in line and 'tracks in playlist:' in line:
+                            try:
+                                total = int(line.split('Found')[1].split('tracks')[0].strip())
+                                current_progress['total_songs'] = total
+                                current_progress['stage'] = 'Fetched playlist info'
+                            except Exception as e:
+                                print(f"Error parsing total tracks: {e}")
+                        elif 'Checking already downloaded songs' in line:
+                            current_progress['stage'] = 'Checking already downloaded songs...'
+                        elif 'Downloading:' in line:
+                            song_info = line.replace('Downloading:', '').strip()
+                            if ' - ' in song_info:
+                                title, artist = song_info.split(' - ', 1)
+                                current_progress['current_song'] = f"{title} by {artist}"
+                            else:
+                                current_progress['current_song'] = song_info
+                            current_progress['stage'] = f"Downloading: {current_progress['current_song']}"
+                        elif 'Finished downloading playlist:' in line:
+                            current_progress['stage'] = 'Finished downloading playlist.'
+                        elif 'Error' in line:
+                            current_progress['stage'] = line
+
+                    # Process stderr
+                    if stderr_line:
+                        line = stderr_line.strip()
+                        print(f"Debug - Stderr: {line}")
+                        if 'Processing Songs:' in line:
+                            try:
+                                # Example: Processing Songs:   3%|3         | 1/29 [00:21<10:05]
+                                if '|' in line:
+                                    parts = line.split('|')
+                                    if len(parts) >= 3:
+                                        progress = parts[2].strip()
+                                        if '/' in progress:
+                                            current, total = progress.split('/')
+                                            current = current.strip()
+                                            total = total.split()[0].strip()
+                                            current_progress['downloaded_songs'] = int(current)
+                                            current_progress['total_songs'] = int(total)
+                                            current_progress['stage'] = f"Downloading songs... ({current}/{total})"
+                                            print(f"Debug - Progress: {current}/{total}")
+                            except Exception as e:
+                                print(f"Error parsing progress: {e}")
+                        elif 'Finished downloading playlist:' in line:
+                            current_progress['downloaded_songs'] = current_progress['total_songs']
+                            current_progress['stage'] = 'Finished downloading playlist.'
+                        elif 'Error' in line:
+                            current_progress['error'] = line
+                            current_progress['status'] = 'error'
+                            current_progress['stage'] = line
+
+                current_downloader_process = None
+
+                if process.returncode not in (0, None):
+                    error = current_progress.get('error', 'Unknown error')
+                    current_progress['error'] = f"Error downloading {playlist['name']}: {error}"
+                    current_progress['status'] = 'error'
+                    current_progress['stage'] = f"Error downloading {playlist['name']}: {error}"
+                    break
+
+            if downloader_running:
+                current_progress['status'] = 'completed'
+                current_progress['stage'] = 'Completed.'
+                time.sleep(INTERVAL)
+        except Exception as e:
+            current_progress['error'] = str(e)
+            current_progress['status'] = 'error'
+            current_progress['stage'] = f"Error: {str(e)}"
+            break
+    current_progress['status'] = 'idle'
+    current_progress['current_playlist'] = None
+    current_progress['current_song'] = None
+    current_progress['total_songs'] = 0
+    current_progress['downloaded_songs'] = 0
+    current_progress['error'] = None
+    current_progress['stage'] = 'Idle.'
+    current_downloader_process = None
 
 @app.route('/')
 def index():
     playlists = load_playlists()
     config = load_config()
     has_credentials = bool(config.get('spotify', {}).get('client_id') and config.get('spotify', {}).get('client_secret'))
-    return render_template('index.html', playlists=playlists, has_credentials=has_credentials)
+    return render_template('index.html', 
+                         playlists=playlists, 
+                         has_credentials=has_credentials,
+                         downloader_running=downloader_running)
 
 @app.route('/add', methods=['POST'])
 def add_playlist():
@@ -115,12 +250,26 @@ def delete_playlist():
 
 @app.route('/start')
 def start_downloader():
-    global downloader_thread
+    global downloader_thread, downloader_running
     if downloader_thread and downloader_thread.is_alive():
         return redirect('/')
+    downloader_running = True
     downloader_thread = threading.Thread(target=downloader_loop, daemon=True)
     downloader_thread.start()
     return redirect('/')
+
+@app.route('/stop')
+def stop_downloader():
+    global downloader_running, current_downloader_process
+    downloader_running = False
+    # Terminate the subprocess if running
+    if current_downloader_process and current_downloader_process.poll() is None:
+        current_downloader_process.terminate()
+    return redirect('/')
+
+@app.route('/progress')
+def get_progress():
+    return jsonify(current_progress)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000) 

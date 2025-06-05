@@ -19,6 +19,12 @@ def downloadSong(song, quiet=False):
     song.download(quiet=quiet)
     if song.file and os.path.exists(song.file):
         song.set_file_attributes(quiet=quiet)
+        # Delete album art after metadata has been applied
+        if getattr(song, 'art', None) and os.path.exists(song.art):
+            try:
+                os.remove(song.art)
+            except FileNotFoundError:
+                pass
         if not quiet:
             print(song.name, "Downloaded")
     else:

@@ -28,8 +28,6 @@ shelveFile.close()
 #set variables
 threadList = []  # stores all threads
 downloadQueue = []  # songs to be downloaded
-album_counts = {}
-album_lock = threading.Lock()
 
 parser = argparse.ArgumentParser(description="Download songs from a Spotify playlist")
 parser.add_argument("playlist_url", help="Spotify playlist URL or URI")
@@ -71,8 +69,6 @@ for song in songs:
     else:
         downloadQueue.append(song)
 
-for song in downloadQueue:
-    album_counts[song.album] = album_counts.get(song.album, 0) + 1
 
 # Progress bar for all songs (downloaded + to download)
 progress_bar = tqdm(total=len(songs), desc="Processing Songs", unit="song", 
@@ -111,16 +107,7 @@ def thread_download(song):
     
     downloadSong(song, quiet=True)
 
-    # Clean up album art when no longer needed
-    with album_lock:
-        album_counts[song.album] -= 1
-        if album_counts[song.album] == 0:
-            art_path = os.path.join(folder_name, song.album + '.jpg')
-            if os.path.exists(art_path):
-                try:
-                    os.remove(art_path)
-                except FileNotFoundError:
-                    pass
+
     
     with downloading_lock:
         currently_downloading.remove(song.name)

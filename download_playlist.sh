@@ -5,7 +5,7 @@ export PAFY_BACKEND=internal
 
 # Install required dependencies
 echo "Installing dependencies..."
-pip install spotipy yt-dlp pafy beautifulsoup4 pytube eyed3 requests > /dev/null 2>&1
+pip install spotipy yt-dlp pafy beautifulsoup4 pytube eyed3 requests tqdm > /dev/null 2>&1
 
 # Check if ffmpeg is installed, install if not found
 if ! command -v ffmpeg &> /dev/null; then

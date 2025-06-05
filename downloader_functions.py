@@ -13,14 +13,17 @@ except ImportError:
     print("Warning: pafy not available, using yt-dlp only")
 
 #download a song using song object
-def downloadSong(song):
-    print("Downloading", song.name)
-    song.download()
+def downloadSong(song, quiet=False):
+    if not quiet:
+        print("Downloading", song.name)
+    song.download(quiet=quiet)
     if song.file and os.path.exists(song.file):
-        song.set_file_attributes()
-        print(song.name, "Downloaded")
+        song.set_file_attributes(quiet=quiet)
+        if not quiet:
+            print(song.name, "Downloaded")
     else:
-        print(f"Failed to download {song.name}")
+        if not quiet:
+            print(f"Failed to download {song.name}")
 
 # returns a list of all track objects from a playlist
 def getTracks(playlist_url, sp):
@@ -117,7 +120,7 @@ class Song():
         self.uri = track['uri']
         self.folder_name = folder_name
 
-    def get_link(self):
+    def get_link(self, quiet=False):
         import json
         import subprocess
         
@@ -199,7 +202,8 @@ class Song():
                 self.video = None
                 
         except Exception as e:
-            print(f"Error in get_link for {self.name}: {e}")
+            if not quiet:
+                print(f"Error in get_link for {self.name}: {e}")
             # Fallback: create a simple search URL
             query = urllib.parse.quote(textToSearch)
             self.closesturl = f"https://www.youtube.com/results?search_query={query}"
@@ -210,10 +214,10 @@ class Song():
 
         
 
-    def download(self):
+    def download(self, quiet=False):
         import subprocess
         
-        self.get_link()
+        self.get_link(quiet=quiet)
         os.makedirs(self.folder_name, exist_ok=True)
         
         output_path = os.path.join(self.folder_name, self.name_file + ".%(ext)s")
@@ -233,7 +237,8 @@ class Song():
             result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
             
             if result.returncode != 0:
-                print(f"Primary download failed for {self.name}, trying backup...")
+                if not quiet:
+                    print(f"Primary download failed for {self.name}, trying backup...")
                 # Try backup URL
                 download_cmd[-1] = self.backupvid
                 result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
@@ -258,14 +263,16 @@ class Song():
                                         self.file = final_path
                     
         except Exception as e:
-            print(f"yt-dlp failed for {self.name}: {e}")
+            if not quiet:
+                print(f"yt-dlp failed for {self.name}: {e}")
             # Fallback to old method
             try:
                 if self.video and pafy:
                     self.video.getbestaudio().download(filepath=os.path.join(self.folder_name, self.name_file))
                     
                     FNULL = open(os.devnull, 'w')
-                    print("Converting", self.name)
+                    if not quiet:
+                        print("Converting", self.name)
                     subprocess.call("ffmpeg -i \"" + os.path.join(self.folder_name, self.name_file)+"\" " + "\""+ final_path +"\"", stdout=FNULL, stderr=subprocess.STDOUT)
                     os.remove(os.path.join(self.folder_name, self.name_file))
                     self.file = final_path
@@ -273,11 +280,12 @@ class Song():
                     raise Exception("No pafy/video object available")
                     
             except Exception as e2:
-                print(f"All download methods failed for {self.name}: {e2}")
+                if not quiet:
+                    print(f"All download methods failed for {self.name}: {e2}")
                 self.file = None
 
     # download a file from a url | returns file location
-    def download_art(self):
+    def download_art(self, quiet=False):
         filename = os.path.join(self.folder_name, self.album + '.jpg')
 
         # check if file is already downloaded
@@ -285,7 +293,8 @@ class Song():
             if self.album + '.jpg' == file:
                 return filename
                 
-        print("Downloading Album Art for", self.name)
+        if not quiet:
+            print("Downloading Album Art for", self.name)
         try:
             res = requests.get(self.art_urls[0])
             res.raise_for_status()
@@ -321,7 +330,7 @@ class Song():
         return filename
 
     # assigns id3 attributes to mp3 file
-    def set_file_attributes(self):
+    def set_file_attributes(self, quiet=False):
         #TEMP SET VAR
         self.file = os.path.join(self.folder_name, self.name_file)+".mp3"
 
@@ -334,10 +343,11 @@ class Song():
 
         try:
             try:
-                self.art = self.download_art()
+                self.art = self.download_art(quiet=quiet)
             except FileNotFoundError:
-                print("Error setting art for", self.name)
-                print(Exception)
+                if not quiet:
+                    print("Error setting art for", self.name)
+                    print(Exception)
             audiofile.tag.artist = ', '.join(self.artists)
             audiofile.tag.album = self.album
             audiofile.tag.title = self.name

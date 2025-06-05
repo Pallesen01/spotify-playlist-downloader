@@ -63,15 +63,44 @@ for folder in os.listdir():
 for song in songs:
     if song.uri in URIs:
         print(song.name, "already downloaded")
-
     else:
         downloadQueue.append(song)
 
-progress_bar = tqdm(total=len(downloadQueue), desc="Downloading Songs", unit="song")
+# Progress bar for all songs (downloaded + to download)
+progress_bar = tqdm(total=len(songs), desc="Processing Songs", unit="song", 
+                   bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+
+# Update progress for already downloaded songs
+already_downloaded = len(songs) - len(downloadQueue)
+progress_bar.update(already_downloaded)
+
+# Track currently downloading songs
+import threading
+downloading_lock = threading.Lock()
+currently_downloading = []
 
 def thread_download(song):
-    downloadSong(song)
-    progress_bar.update(1)
+    with downloading_lock:
+        currently_downloading.append(song.name)
+        # Update progress bar description with current downloads
+        current_desc = f"Downloading: {', '.join(currently_downloading[:3])}"
+        if len(currently_downloading) > 3:
+            current_desc += f" (+{len(currently_downloading)-3} more)"
+        progress_bar.set_description(current_desc)
+    
+    downloadSong(song, quiet=True)
+    
+    with downloading_lock:
+        currently_downloading.remove(song.name)
+        progress_bar.update(1)
+        # Update description after completion
+        if currently_downloading:
+            current_desc = f"Downloading: {', '.join(currently_downloading[:3])}"
+            if len(currently_downloading) > 3:
+                current_desc += f" (+{len(currently_downloading)-3} more)"
+            progress_bar.set_description(current_desc)
+        else:
+            progress_bar.set_description("Processing Songs")
 
 #While there are songs in download queue download songs
 while len(downloadQueue) > 0:
@@ -90,6 +119,9 @@ while len(downloadQueue) > 0:
 #Wait for all thread to finish
 for t in threadList:
     t.join()
+
+progress_bar.set_description("Finalizing...")
+progress_bar.close()
 
 print("Deleting images")
 deleteAllImages(folder_name)

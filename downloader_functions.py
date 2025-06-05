@@ -278,7 +278,11 @@ def download_from_bandcamp(song, quiet=False):
 
 def download_from_soundcloud(song, quiet=False):
     """Download audio from SoundCloud via yt-dlp search."""
-    return _generic_download(song, PROVIDERS['soundcloud'], quiet)
+    return _generic_download(song, DownloadProvider(
+        name='SoundCloud',
+        url_resolver=_resolve_soundcloud_url,
+        use_ytdlp=True
+    ), quiet)
 
 def download_from_jamendo(song, quiet=False):
     """Download from Jamendo using its open API."""

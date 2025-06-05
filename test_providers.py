@@ -30,50 +30,6 @@ def test_python_import(module_name):
     except ImportError as e:
         return False, f"Failed to import {module_name}: {e}"
 
-def test_qobuz():
-    """Test Qobuz provider"""
-    print("🎵 Testing Qobuz...")
-    
-    # Check environment variables
-    required_vars = ['QOBUZ_EMAIL', 'QOBUZ_PASSWORD', 'QOBUZ_APP_ID', 'QOBUZ_SECRETS']
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
-    
-    if missing_vars:
-        print(f"   ❌ Missing environment variables: {', '.join(missing_vars)}")
-        return False
-    
-    # Check qobuz_dl module
-    success, msg = test_python_import('qobuz_dl.qopy')
-    if not success:
-        print(f"   ❌ {msg}")
-        return False
-    
-    print("   ✅ Qobuz credentials and module available")
-    return True
-
-def test_bandcamp():
-    """Test Bandcamp provider"""
-    print("🎸 Testing Bandcamp...")
-    
-    # Test yt-dlp availability
-    success, stdout, stderr = test_command('yt-dlp --version', 'yt-dlp')
-    if not success:
-        print(f"   ❌ yt-dlp not available: {stderr}")
-        return False
-    
-    # Test basic web connectivity to Bandcamp
-    try:
-        response = requests.get('https://bandcamp.com', timeout=10)
-        if response.status_code == 200:
-            print("   ✅ Bandcamp accessible via yt-dlp")
-            return True
-        else:
-            print(f"   ❌ Bandcamp returned status {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"   ❌ Cannot reach Bandcamp: {e}")
-        return False
-
 def test_soundcloud():
     """Test SoundCloud provider"""
     print("☁️ Testing SoundCloud...")
@@ -93,34 +49,6 @@ def test_soundcloud():
         return True
     else:
         print(f"   ❌ SoundCloud search failed: {stderr}")
-        return False
-
-def test_jamendo():
-    """Test Jamendo provider"""
-    print("🎼 Testing Jamendo...")
-    
-    client_id = os.getenv('JAMENDO_CLIENT_ID')
-    if not client_id:
-        print("   ❌ Missing JAMENDO_CLIENT_ID environment variable")
-        return False
-    
-    # Test Jamendo API
-    try:
-        api_url = f"https://api.jamendo.com/v3.0/tracks/?client_id={client_id}&format=json&limit=1&search=test"
-        response = requests.get(api_url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            if 'results' in data:
-                print("   ✅ Jamendo API accessible")
-                return True
-            else:
-                print("   ❌ Jamendo API returned unexpected format")
-                return False
-        else:
-            print(f"   ❌ Jamendo API returned status {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"   ❌ Cannot reach Jamendo API: {e}")
         return False
 
 def test_youtube():
@@ -203,10 +131,7 @@ def main():
     results = {}
     
     # Test each provider
-    results['qobuz'] = test_qobuz()
-    results['bandcamp'] = test_bandcamp()
     results['soundcloud'] = test_soundcloud()
-    results['jamendo'] = test_jamendo()
     results['youtube'] = test_youtube()
     results['ffmpeg'] = test_ffmpeg()
     
@@ -222,10 +147,7 @@ def main():
     broken_providers = []
     
     provider_names = {
-        'qobuz': 'Qobuz (High Quality)',
-        'bandcamp': 'Bandcamp',
         'soundcloud': 'SoundCloud', 
-        'jamendo': 'Jamendo',
         'youtube': 'YouTube (Primary)',
         'ffmpeg': 'FFmpeg (Audio Processing)',
         'download_test': 'Actual Download Test'
@@ -260,10 +182,6 @@ def main():
         print("   • Install/update yt-dlp: pip install -U yt-dlp")
     if not results['ffmpeg']:
         print("   • Install FFmpeg from https://ffmpeg.org/")
-    if not results['qobuz'] and any(os.getenv(var) for var in ['QOBUZ_EMAIL', 'QOBUZ_PASSWORD', 'QOBUZ_APP_ID', 'QOBUZ_SECRETS']):
-        print("   • Install qobuz-dl: pip install qobuz-dl")
-    if not results['jamendo'] and os.getenv('JAMENDO_CLIENT_ID'):
-        print("   • Check your JAMENDO_CLIENT_ID is valid")
 
 if __name__ == "__main__":
     main() 

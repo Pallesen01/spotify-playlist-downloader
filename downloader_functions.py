@@ -1,6 +1,8 @@
 import urllib, os, spotipy, subprocess, eyed3, requests
 from bs4 import BeautifulSoup
 from pytube import YouTube
+from dataclasses import dataclass
+from typing import Optional, Callable, Dict, Any
 
 # Set pafy backend before importing
 import os as os_env
@@ -12,78 +14,7 @@ except ImportError:
     pafy = None
     print("Warning: pafy not available, using yt-dlp only")
 
-# Attempt high quality downloads from Qobuz if credentials are provided
-def download_from_qobuz(song, quiet=False):
-    """Download a song from Qobuz if possible.
 
-    This function requires the environment variables ``QOBUZ_EMAIL``,
-    ``QOBUZ_PASSWORD``, ``QOBUZ_APP_ID`` and ``QOBUZ_SECRETS`` (comma separated
-    secrets). If any of these are missing or the download fails, ``False`` is
-    returned so the caller can fall back to the usual YouTube method.
-    """
-
-    q_email = os.getenv("QOBUZ_EMAIL")
-    q_pass = os.getenv("QOBUZ_PASSWORD")
-    q_app_id = os.getenv("QOBUZ_APP_ID")
-    q_secrets = os.getenv("QOBUZ_SECRETS")
-
-    if not all([q_email, q_pass, q_app_id, q_secrets]):
-        return False
-
-    try:
-        from qobuz_dl.qopy import Client
-    except Exception:
-        return False
-
-    try:
-        secrets = [s for s in q_secrets.split(',') if s]
-        client = Client(q_email, q_pass, q_app_id, secrets)
-        query = f"{song.name} {song.artists[0]}"
-        res = client.search_tracks(query, limit=1)
-        items = res.get('tracks', {}).get('items', [])
-        if not items:
-            return False
-
-        track_id = items[0]['id']
-
-        # Try hi-res >96kHz then <96kHz then lossless
-        fmt_ids = [27, 7, 6]
-        track_data = None
-        for fmt in fmt_ids:
-            try:
-                track_data = client.get_track_url(track_id, fmt_id=fmt)
-                if 'url' in track_data:
-                    break
-            except Exception:
-                track_data = None
-        if not track_data or 'url' not in track_data:
-            # Fallback to 320k mp3
-            track_data = client.get_track_url(track_id, fmt_id=5)
-
-        url = track_data.get('url')
-        if not url:
-            return False
-
-        bitrate = track_data.get('bitrate', 0)
-        bit_depth = track_data.get('bit_depth')
-        ext = '.flac' if (bit_depth and bitrate and bitrate > 320000) else '.mp3'
-
-        os.makedirs(song.folder_name, exist_ok=True)
-        fname = os.path.join(song.folder_name, song.name_file + ext)
-
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            with open(fname, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-
-        song.file = fname
-        return True
-    except Exception as e:
-        if not quiet:
-            print(f"Qobuz download failed for {song.name}: {e}")
-        return False
 
 def get_audio_bitrate(file_path):
     """Return the bitrate of the audio stream in bits per second or None."""
@@ -128,102 +59,230 @@ def adjust_audio_format(file_path, quiet=False):
             print(f"Format adjustment failed for {file_path}")
     return file_path
 
-def download_from_bandcamp(song, quiet=False):
-    """Attempt to download from Bandcamp using yt-dlp."""
-    try:
-        query = urllib.parse.quote(f"{song.name} {song.artists[0]}")
-        search_url = f"https://bandcamp.com/search?q={query}"
-        res = requests.get(search_url, timeout=15)
-        res.raise_for_status()
-        soup = BeautifulSoup(res.text, 'html.parser')
-        link_tag = soup.select_one('li.searchresult a.itemurl')
-        if not link_tag or not link_tag.get('href'):
-            return False
-        url = link_tag['href']
+@dataclass
+class DownloadProvider:
+    """Configuration for a download provider"""
+    name: str
+    url_resolver: Callable[[str], Optional[str]]  # Function that takes query and returns download URL
+    use_ytdlp: bool = True  # Whether to use yt-dlp for actual download
+    direct_download: bool = False  # Whether to download directly without yt-dlp
+    timeout: int = 300
+    
+def _ytdlp_download(song, url, quiet=False):
+    """Common yt-dlp download logic"""
+    os.makedirs(song.folder_name, exist_ok=True)
+    output_path = os.path.join(song.folder_name, song.name_file + '.%(ext)s')
+    cmd = [
+        'yt-dlp', '--extract-audio', '--audio-format', 'best',
+        '--audio-quality', '0', '--output', output_path, url
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        return False
+    
+    # Find downloaded file
+    for f in os.listdir(song.folder_name):
+        if f.startswith(song.name_file):
+            song.file = os.path.join(song.folder_name, f)
+            break
+    
+    if not song.file:
+        return False
+    
+    song.file = adjust_audio_format(song.file, quiet=quiet)
+    return True
 
-        os.makedirs(song.folder_name, exist_ok=True)
-        output_path = os.path.join(song.folder_name, song.name_file + '.%(ext)s')
-        cmd = [
-            'yt-dlp', '--extract-audio', '--audio-format', 'best',
-            '--audio-quality', '0', '--output', output_path, url
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
+def _direct_download(song, url, quiet=False):
+    """Direct download without yt-dlp"""
+    os.makedirs(song.folder_name, exist_ok=True)
+    fname = os.path.join(song.folder_name, song.name_file + '.mp3')
+    
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(fname, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+    
+    song.file = adjust_audio_format(fname, quiet=quiet)
+    return True
+
+def _qobuz_download(song, url_data, quiet=False):
+    """Special download function for Qobuz with quality selection"""
+    if not url_data:
+        return False
+    
+    url = url_data.get('url')
+    if not url:
+        return False
+
+    bitrate = url_data.get('bitrate', 0)
+    bit_depth = url_data.get('bit_depth')
+    ext = '.flac' if (bit_depth and bitrate and bitrate > 320000) else '.mp3'
+
+    os.makedirs(song.folder_name, exist_ok=True)
+    fname = os.path.join(song.folder_name, song.name_file + ext)
+
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(fname, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+    song.file = fname
+    return True
+
+def _generic_download(song, provider: DownloadProvider, quiet=False):
+    """Generic download function that works with any provider"""
+    try:
+        query = f"{song.name} {song.artists[0]}"
+        
+        # Special handling for Qobuz
+        if provider.name == 'Qobuz':
+            url_data = provider.url_resolver(query)
+            return _qobuz_download(song, url_data, quiet)
+        
+        url = provider.url_resolver(query)
+        
+        if not url:
             return False
-        for f in os.listdir(song.folder_name):
-            if f.startswith(song.name_file):
-                song.file = os.path.join(song.folder_name, f)
-                break
-        if not song.file:
-            return False
-        song.file = adjust_audio_format(song.file, quiet=quiet)
-        return True
+        
+        if provider.direct_download:
+            return _direct_download(song, url, quiet)
+        else:
+            return _ytdlp_download(song, url, quiet)
+            
     except Exception as e:
         if not quiet:
-            print(f"Bandcamp download failed for {song.name}: {e}")
+            print(f"{provider.name} download failed for {song.name}: {e}")
         return False
+
+# URL resolver functions for each provider
+def _resolve_bandcamp_url(query):
+    """Find Bandcamp URL for a search query"""
+    search_url = f"https://bandcamp.com/search?q={urllib.parse.quote(query)}"
+    res = requests.get(search_url, timeout=15)
+    res.raise_for_status()
+    soup = BeautifulSoup(res.text, 'html.parser')
+    link_tag = soup.select_one('li.searchresult a.itemurl')
+    return link_tag['href'] if link_tag and link_tag.get('href') else None
+
+def _resolve_soundcloud_url(query):
+    """Generate SoundCloud search URL for yt-dlp"""
+    return f'scsearch1:{query}'
+
+def _resolve_jamendo_url(query):
+    """Find Jamendo direct download URL"""
+    client_id = os.getenv('JAMENDO_CLIENT_ID')
+    if not client_id:
+        return None
+    
+    api_url = (
+        f"https://api.jamendo.com/v3.0/tracks/?client_id={client_id}&format=json"
+        f"&limit=1&search={urllib.parse.quote(query)}"
+    )
+    res = requests.get(api_url, timeout=15)
+    res.raise_for_status()
+    data = res.json()
+    tracks = data.get('results')
+    if not tracks:
+        return None
+    return tracks[0].get('audiodownload') or tracks[0].get('audio')
+
+def _resolve_qobuz_url(query):
+    """Find Qobuz track and return download data"""
+    q_email = os.getenv("QOBUZ_EMAIL")
+    q_pass = os.getenv("QOBUZ_PASSWORD")
+    q_app_id = os.getenv("QOBUZ_APP_ID")
+    q_secrets = os.getenv("QOBUZ_SECRETS")
+
+    if not all([q_email, q_pass, q_app_id, q_secrets]):
+        return None
+
+    try:
+        from qobuz_dl.qopy import Client
+    except Exception:
+        return None
+
+    try:
+        secrets = [s for s in q_secrets.split(',') if s]
+        client = Client(q_email, q_pass, q_app_id, secrets)
+        res = client.search_tracks(query, limit=1)
+        items = res.get('tracks', {}).get('items', [])
+        if not items:
+            return None
+
+        track_id = items[0]['id']
+
+        # Try hi-res >96kHz then <96kHz then lossless
+        fmt_ids = [27, 7, 6]
+        track_data = None
+        for fmt in fmt_ids:
+            try:
+                track_data = client.get_track_url(track_id, fmt_id=fmt)
+                if 'url' in track_data:
+                    break
+            except Exception:
+                track_data = None
+        if not track_data or 'url' not in track_data:
+            # Fallback to 320k mp3
+            track_data = client.get_track_url(track_id, fmt_id=5)
+
+        return track_data
+    except Exception:
+        return None
+
+# Provider configurations
+PROVIDERS = {
+    'qobuz': DownloadProvider(
+        name='Qobuz',
+        url_resolver=_resolve_qobuz_url,
+        direct_download=True  # Uses special _qobuz_download function
+    ),
+    'bandcamp': DownloadProvider(
+        name='Bandcamp',
+        url_resolver=_resolve_bandcamp_url,
+        use_ytdlp=True
+    ),
+    'soundcloud': DownloadProvider(
+        name='SoundCloud', 
+        url_resolver=_resolve_soundcloud_url,
+        use_ytdlp=True
+    ),
+    'jamendo': DownloadProvider(
+        name='Jamendo',
+        url_resolver=_resolve_jamendo_url,
+        direct_download=True
+    )
+}
+
+def register_provider(key: str, provider: DownloadProvider):
+    """Register a new download provider"""
+    PROVIDERS[key] = provider
+
+def create_provider_function(provider_key: str):
+    """Create a download function for a provider"""
+    def download_func(song, quiet=False):
+        return _generic_download(song, PROVIDERS[provider_key], quiet)
+    return download_func
+
+# Simplified provider functions using the generic system
+def download_from_qobuz(song, quiet=False):
+    """Download a song from Qobuz if possible."""
+    return _generic_download(song, PROVIDERS['qobuz'], quiet)
+
+def download_from_bandcamp(song, quiet=False):
+    """Attempt to download from Bandcamp using yt-dlp."""
+    return _generic_download(song, PROVIDERS['bandcamp'], quiet)
 
 def download_from_soundcloud(song, quiet=False):
     """Download audio from SoundCloud via yt-dlp search."""
-    try:
-        query = f"{song.name} {song.artists[0]}"
-        os.makedirs(song.folder_name, exist_ok=True)
-        output_path = os.path.join(song.folder_name, song.name_file + '.%(ext)s')
-        cmd = [
-            'yt-dlp', '--extract-audio', '--audio-format', 'best',
-            '--audio-quality', '0', '--output', output_path,
-            f'scsearch1:{query}'
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            return False
-        for f in os.listdir(song.folder_name):
-            if f.startswith(song.name_file):
-                song.file = os.path.join(song.folder_name, f)
-                break
-        if not song.file:
-            return False
-        song.file = adjust_audio_format(song.file, quiet=quiet)
-        return True
-    except Exception as e:
-        if not quiet:
-            print(f"SoundCloud download failed for {song.name}: {e}")
-        return False
+    return _generic_download(song, PROVIDERS['soundcloud'], quiet)
 
 def download_from_jamendo(song, quiet=False):
     """Download from Jamendo using its open API."""
-    client_id = os.getenv('JAMENDO_CLIENT_ID')
-    if not client_id:
-        return False
-    try:
-        query = urllib.parse.quote(f"{song.name} {song.artists[0]}")
-        api_url = (
-            f"https://api.jamendo.com/v3.0/tracks/?client_id={client_id}&format=json"
-            f"&limit=1&search={query}"
-        )
-        res = requests.get(api_url, timeout=15)
-        res.raise_for_status()
-        data = res.json()
-        tracks = data.get('results')
-        if not tracks:
-            return False
-        url = tracks[0].get('audiodownload') or tracks[0].get('audio')
-        if not url:
-            return False
-        os.makedirs(song.folder_name, exist_ok=True)
-        fname = os.path.join(song.folder_name, song.name_file + '.mp3')
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            with open(fname, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-        song.file = adjust_audio_format(fname, quiet=quiet)
-        return True
-    except Exception as e:
-        if not quiet:
-            print(f"Jamendo download failed for {song.name}: {e}")
-        return False
+    return _generic_download(song, PROVIDERS['jamendo'], quiet)
 
 #download a song using song object
 def downloadSong(song, quiet=False):
@@ -650,3 +709,49 @@ class Song():
 
         except UnboundLocalError:
             pass
+
+# Example of how to add a new provider:
+# def _resolve_newsite_url(query):
+#     """Find NewSite URL for a search query"""
+#     # Your search logic here
+#     return url_or_none
+# 
+# register_provider('newsite', DownloadProvider(
+#     name='NewSite',
+#     url_resolver=_resolve_newsite_url,
+#     use_ytdlp=True  # or direct_download=True
+# ))
+# 
+# download_from_newsite = create_provider_function('newsite')
+
+# Here's a real example - adding Freesound.org support:
+def _resolve_freesound_url(query):
+    """Find Freesound.org URL for a search query (requires API key)"""
+    api_key = os.getenv('FREESOUND_API_KEY')
+    if not api_key:
+        return None
+    
+    try:
+        # Freesound API search
+        api_url = f"https://freesound.org/apiv2/search/text/?query={urllib.parse.quote(query)}&token={api_key}&format=json&fields=id,name,previews"
+        res = requests.get(api_url, timeout=15)
+        res.raise_for_status()
+        data = res.json()
+        
+        if not data.get('results'):
+            return None
+            
+        # Get the first result's preview URL
+        sound = data['results'][0]
+        preview_url = sound.get('previews', {}).get('preview-hq-mp3')
+        return preview_url
+    except Exception:
+        return None
+
+# Register the new provider (commented out since most users won't have API key)
+# register_provider('freesound', DownloadProvider(
+#     name='Freesound',
+#     url_resolver=_resolve_freesound_url,
+#     direct_download=True
+# ))
+# download_from_freesound = create_provider_function('freesound')

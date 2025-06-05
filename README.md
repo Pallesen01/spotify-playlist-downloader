@@ -35,4 +35,4 @@ A basic Tkinter GUI is provided in `gui.py` for users who prefer not to use the 
 python gui.py
 ```
 
-Enter the playlist URL and an optional limit, then click **Start Download** to begin. Console output from the downloader will be shown in the window.
+Enter the playlist URL and an optional limit, choose a destination folder, then click **Start Download**. Console output from the downloader will be shown in the window.

@@ -2,4 +2,5 @@ AGENTS.md
 spotify_data
 __pycache__/
 .cache/
+config.json
 

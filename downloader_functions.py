@@ -27,6 +27,8 @@ def downloadSong(song, quiet=False):
 
 # returns a list of all track objects from a playlist
 def getTracks(playlist_url, sp):
+    from tqdm import tqdm
+    
     allTracks = []
     if 'https://open.spotify.com/playlist/' in playlist_url:
         # New format: https://open.spotify.com/playlist/ID
@@ -45,29 +47,39 @@ def getTracks(playlist_url, sp):
         playlist_id = playlist_id.split('?', 1)[0]
         playlist = sp.user_playlist(playlist_user, playlist_id)
 
+    # Get total track count for progress bar
+    total_tracks = playlist['tracks']['total']
+    progress_bar = tqdm(total=total_tracks, desc="Getting playlist tracks", unit="track",
+                       bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+
     if 'https://open.spotify.com/playlist/' in playlist_url:
         # For new format, use playlist_tracks
         results = sp.playlist_tracks(playlist['id'])
         tracks = results
         for track in tracks['items']:
             allTracks.append(Song(track['track'], playlist['name']))
+            progress_bar.update(1)
 
         while tracks['next']:
             tracks = sp.next(tracks)
             for track in tracks['items']:
                 allTracks.append(Song(track['track'], playlist['name']))
+                progress_bar.update(1)
     else:
         # For old format, use user_playlist
         results = sp.user_playlist(playlist_user, playlist['id'], fields="tracks,next")
         tracks = results['tracks']
         for track in tracks['items']:
             allTracks.append(Song(track['track'], playlist['name']))
+            progress_bar.update(1)
 
         while tracks['next']:
             tracks = sp.next(tracks)
             for track in tracks['items']:
                 allTracks.append(Song(track['track'], playlist['name']))
+                progress_bar.update(1)
 
+    progress_bar.close()
     return allTracks, playlist['name']
 
 #delete all images in specified folder

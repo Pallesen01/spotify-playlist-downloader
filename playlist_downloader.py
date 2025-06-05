@@ -36,11 +36,10 @@ except IndexError:
     print("Usage: python playlist_downloader.py <playlist_url>")
     sys.exit(1)
 
-print("Getting all songs from playlist...")
 songs, folder_name = getTracks(playlist_url, sp)
 os.makedirs(folder_name, exist_ok=True)
 
-print("Getting already downloaded songs...")
+print("Checking already downloaded songs...")
 #get URIs of downloaded songs
 URIs = []
 playlistFolderURIs = []

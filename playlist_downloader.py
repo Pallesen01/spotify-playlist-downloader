@@ -62,7 +62,7 @@ for folder in os.listdir():
 
 for song in songs:
     if song.uri in URIs:
-        print(song.name, "already downloaded")
+        pass  # Skip already downloaded songs silently
     else:
         downloadQueue.append(song)
 

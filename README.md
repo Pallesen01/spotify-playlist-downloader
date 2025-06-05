@@ -26,3 +26,13 @@ To download only the first N songs, provide the `--limit` option:
 ```bash
 python playlist_downloader.py <playlist_url> --limit N
 ```
+
+## Graphical Interface
+
+A basic Tkinter GUI is provided in `gui.py` for users who prefer not to use the command line. Run it with:
+
+```bash
+python gui.py
+```
+
+Enter the playlist URL and an optional limit, then click **Start Download** to begin. Console output from the downloader will be shown in the window.

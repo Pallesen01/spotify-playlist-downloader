@@ -1,4 +1,4 @@
-import spotipy, os, urllib, pafy, shelve, threading, sys
+import spotipy, os, urllib, pafy, shelve, threading, sys, argparse
 from tqdm import tqdm
 from spotipy.oauth2 import SpotifyClientCredentials
 from downloader_functions import *
@@ -26,17 +26,18 @@ shelveFile.close()
 #test_link = "https://open.spotify.com/user/sparks_of_fire/playlist/4ScHDVxjzDpBFOyyKdWw6G?si=R_AFDhOJTYymeBpjs96jhw"
 
 #set variables
-threadList = [] # stores all threads
-downloadQueue = [] #songs to be downloaded
+threadList = []  # stores all threads
+downloadQueue = []  # songs to be downloaded
 
-try:
-    playlist_url = sys.argv[1]
-except IndexError:
-    print("Error - no playlist link found")
-    print("Usage: python playlist_downloader.py <playlist_url>")
-    sys.exit(1)
+parser = argparse.ArgumentParser(description="Download songs from a Spotify playlist")
+parser.add_argument("playlist_url", help="Spotify playlist URL or URI")
+parser.add_argument("--limit", "-l", type=int, help="Only download the first N songs", default=None)
+args = parser.parse_args()
 
-songs, folder_name = getTracks(playlist_url, sp)
+playlist_url = args.playlist_url
+limit = args.limit
+
+songs, folder_name = getTracks(playlist_url, sp, limit=limit)
 os.makedirs(folder_name, exist_ok=True)
 
 print("Checking already downloaded songs...")
@@ -44,20 +45,23 @@ print("Checking already downloaded songs...")
 URIs = []
 playlistFolderURIs = []
 for file in os.listdir(folder_name):
-    playlistFolderURIs.append(getUri(os.path.join(folder_name, file)))
+    file_path = os.path.join(folder_name, file)
+    if os.path.isfile(file_path):
+        playlistFolderURIs.append(getUri(file_path))
 
 
 #Don't download dupe songs from other folders
 URIs.extend(playlistFolderURIs)
 
 for folder in os.listdir():
-    if folder == folder_name:
-        pass
-    try:
-        for file in os.listdir(folder):
-            URIs.append(getUri(os.path.join(folder, file)))
-    except NotADirectoryError:
-        pass
+    if folder == folder_name or folder.startswith('.'):
+        continue
+    if not os.path.isdir(folder):
+        continue
+    for file in os.listdir(folder):
+        file_path = os.path.join(folder, file)
+        if os.path.isfile(file_path):
+            URIs.append(getUri(file_path))
 
 for song in songs:
     if song.uri in URIs:

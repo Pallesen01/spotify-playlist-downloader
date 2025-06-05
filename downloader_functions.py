@@ -26,9 +26,20 @@ def downloadSong(song, quiet=False):
             print(f"Failed to download {song.name}")
 
 # returns a list of all track objects from a playlist
-def getTracks(playlist_url, sp):
+def getTracks(playlist_url, sp, limit=None):
+    """Return a list of Song objects from a playlist.
+
+    Parameters
+    ----------
+    playlist_url : str
+        Spotify playlist URL or URI.
+    sp : spotipy.Spotify
+        Authenticated Spotipy client.
+    limit : int, optional
+        Maximum number of tracks to return. If None, return all tracks.
+    """
     from tqdm import tqdm
-    
+
     allTracks = []
     if 'https://open.spotify.com/playlist/' in playlist_url:
         # New format: https://open.spotify.com/playlist/ID
@@ -49,7 +60,11 @@ def getTracks(playlist_url, sp):
 
     # Get total track count for progress bar
     total_tracks = playlist['tracks']['total']
-    progress_bar = tqdm(total=total_tracks, desc="Getting playlist tracks", unit="track",
+    if limit is not None:
+        progress_total = min(limit, total_tracks)
+    else:
+        progress_total = total_tracks
+    progress_bar = tqdm(total=progress_total, desc="Getting playlist tracks", unit="track",
                        bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
 
     if 'https://open.spotify.com/playlist/' in playlist_url:
@@ -59,12 +74,18 @@ def getTracks(playlist_url, sp):
         for track in tracks['items']:
             allTracks.append(Song(track['track'], playlist['name']))
             progress_bar.update(1)
+            if limit is not None and len(allTracks) >= limit:
+                progress_bar.close()
+                return allTracks, playlist['name']
 
-        while tracks['next']:
+        while tracks['next'] and (limit is None or len(allTracks) < limit):
             tracks = sp.next(tracks)
             for track in tracks['items']:
                 allTracks.append(Song(track['track'], playlist['name']))
                 progress_bar.update(1)
+                if limit is not None and len(allTracks) >= limit:
+                    progress_bar.close()
+                    return allTracks, playlist['name']
     else:
         # For old format, use user_playlist
         results = sp.user_playlist(playlist_user, playlist['id'], fields="tracks,next")
@@ -72,12 +93,18 @@ def getTracks(playlist_url, sp):
         for track in tracks['items']:
             allTracks.append(Song(track['track'], playlist['name']))
             progress_bar.update(1)
+            if limit is not None and len(allTracks) >= limit:
+                progress_bar.close()
+                return allTracks, playlist['name']
 
-        while tracks['next']:
+        while tracks['next'] and (limit is None or len(allTracks) < limit):
             tracks = sp.next(tracks)
             for track in tracks['items']:
                 allTracks.append(Song(track['track'], playlist['name']))
                 progress_bar.update(1)
+                if limit is not None and len(allTracks) >= limit:
+                    progress_bar.close()
+                    return allTracks, playlist['name']
 
     progress_bar.close()
     return allTracks, playlist['name']

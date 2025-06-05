@@ -105,85 +105,149 @@ class Song():
         self.folder_name = folder_name
 
     def get_link(self):
-        videoList = []
-        closestVideo = None
-        closestDur = None
-        durDiff = None
+        import json
+        import subprocess
+        
         textToSearch = self.name + ' ' + self.artists[0]
-        query = urllib.parse.quote(textToSearch)
-        url = "https://www.youtube.com/results?search_query=" + query
-        response = urllib.request.urlopen(url)
-        html = response.read()
-        soup = BeautifulSoup(html, 'html.parser')
-        backupVid = None
-        for vid in soup.findAll(attrs={'class':'yt-uix-tile-link'}):
-            videoList.append('https://www.youtube.com' + vid['href'])
-
-        for url in videoList[:3]:
-            try:
-                video = pafy.new(url)
-
-            except ValueError:
-                pass
-
-            except Exception as e:
-                print("Error using pafy: ", e)
-                continue
-
-            durDiff = abs(video.length - self.duration)
-            if closestDur == None:
-                closestDur = durDiff
-                closestVideo = url
-
-            elif durDiff < closestDur:
+        
+        try:
+            # Use yt-dlp to search YouTube
+            search_cmd = [
+                'yt-dlp', 
+                '--dump-json', 
+                '--no-download',
+                '--flat-playlist',
+                f'ytsearch5:{textToSearch}'
+            ]
+            
+            result = subprocess.run(search_cmd, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode != 0:
+                raise Exception(f"yt-dlp search failed: {result.stderr}")
+            
+            videos = []
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    try:
+                        video_info = json.loads(line)
+                        videos.append({
+                            'url': f"https://www.youtube.com/watch?v={video_info['id']}",
+                            'duration': video_info.get('duration', 0),
+                            'title': video_info.get('title', '')
+                        })
+                    except json.JSONDecodeError:
+                        continue
+            
+            if not videos:
+                raise Exception("No videos found")
+            
+            # Find closest duration match
+            closestVideo = None
+            closestDur = None
+            backupVid = None
+            
+            for video in videos[:3]:
+                if video['duration']:
+                    durDiff = abs(video['duration'] - self.duration)
+                    if closestDur is None or durDiff < closestDur:
+                        backupVid = closestVideo
+                        closestDur = durDiff
+                        closestVideo = video['url']
+            
+            # Fallback to first video if no duration matching worked
+            if closestVideo is None:
+                closestVideo = videos[0]['url']
+            if backupVid is None and len(videos) > 1:
+                backupVid = videos[1]['url']
+            elif backupVid is None:
                 backupVid = closestVideo
-                closestDur = durDiff
-                closestVideo = url
-
-        if backupVid == None:
-            backupVid = videoList[1]
-
-        self.backupvid = backupVid
-        self.closesturl = closestVideo
-        self.video = pafy.new(closestVideo)
+                
+            self.closesturl = closestVideo
+            self.backupvid = backupVid
+            
+            # Try to create pafy object for compatibility
+            try:
+                self.video = pafy.new(closestVideo)
+            except:
+                self.video = None
+                
+        except Exception as e:
+            print(f"Error in get_link for {self.name}: {e}")
+            # Fallback: create a simple search URL
+            query = urllib.parse.quote(textToSearch)
+            self.closesturl = f"https://www.youtube.com/results?search_query={query}"
+            self.backupvid = self.closesturl
+            self.video = None
 
 
 
         
 
     def download(self):
+        import subprocess
+        
         self.get_link()
         os.makedirs(self.folder_name, exist_ok=True)
+        
+        output_path = os.path.join(self.folder_name, self.name_file + ".%(ext)s")
+        final_path = os.path.join(self.folder_name, self.name_file + ".mp3")
+        
         try:
-            self.video.getbestaudio().download(filepath=os.path.join(self.folder_name, self.name_file))
-
-        except:
+            # Use yt-dlp to download directly as mp3
+            download_cmd = [
+                'yt-dlp',
+                '--extract-audio',
+                '--audio-format', 'mp3',
+                '--audio-quality', '0',  # best quality
+                '--output', output_path,
+                self.closesturl
+            ]
+            
+            result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode != 0:
+                print(f"Primary download failed for {self.name}, trying backup...")
+                # Try backup URL
+                download_cmd[-1] = self.backupvid
+                result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
+                
+                if result.returncode != 0:
+                    raise Exception(f"Both downloads failed: {result.stderr}")
+            
+            # Find the actual downloaded file (yt-dlp might change the extension)
+            for file in os.listdir(self.folder_name):
+                if file.startswith(self.name_file) and file.endswith('.mp3'):
+                    self.file = os.path.join(self.folder_name, file)
+                    break
+            else:
+                # If no mp3 found, look for any file with our name and rename it
+                for file in os.listdir(self.folder_name):
+                    if file.startswith(self.name_file):
+                        old_path = os.path.join(self.folder_name, file)
+                        os.rename(old_path, final_path)
+                        self.file = final_path
+                        break
+                else:
+                    self.file = final_path
+                    
+        except Exception as e:
+            print(f"yt-dlp failed for {self.name}: {e}")
+            # Fallback to old method
             try:
-                print("Error Downloading with Pafy...\nTrying pytube...")
-                yt = YouTube(self.closesturl)
-                stream = yt.streams.first()
-                stream.download(os.path.join(self.folder_name, self.name_file))
-
-            except:
-                try:
-                    print("Error with first url")
-                    self.video = pafy.new(self.backupvid)
+                if self.video:
                     self.video.getbestaudio().download(filepath=os.path.join(self.folder_name, self.name_file))
-
-                except:
-                    print(self.closesturl)
-                    print(self.backupvid)
-                    yt = YouTube(self.backupvid)
-                    stream = yt.streams.first()
-                    stream.download(os.path.join(self.folder_name, self.name_file))
-
-
-
-        FNULL = open(os.devnull, 'w')
-        print("Converting", self.name)
-        subprocess.call("ffmpeg -i \"" + os.path.join(self.folder_name, self.name_file)+"\" " + "\""+ os.path.join(self.folder_name, self.name_file)+".mp3\"", stdout=FNULL, stderr=subprocess.STDOUT)
-        os.remove(os.path.join(self.folder_name, self.name_file))
-        self.file = os.path.join(self.folder_name, self.name_file)+".mp3"
+                    
+                    FNULL = open(os.devnull, 'w')
+                    print("Converting", self.name)
+                    subprocess.call("ffmpeg -i \"" + os.path.join(self.folder_name, self.name_file)+"\" " + "\""+ final_path +"\"", stdout=FNULL, stderr=subprocess.STDOUT)
+                    os.remove(os.path.join(self.folder_name, self.name_file))
+                    self.file = final_path
+                else:
+                    raise Exception("No video object available")
+                    
+            except Exception as e2:
+                print(f"All download methods failed for {self.name}: {e2}")
+                self.file = None
 
     # download a file from a url | returns file location
     def download_art(self):

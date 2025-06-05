@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from pytube import YouTube
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict, Any
+import sys
 
 # Set pafy backend before importing
 import os as os_env
@@ -451,6 +452,8 @@ class Song():
         self.file_basename = f"{self.track_number:02d} - {self.name_file}"
         self.file = None
         self.art = None
+        print(f"[DEBUG] Song initialized: folder_name={self.folder_name}, file_basename={self.file_basename}", flush=True)
+        print(f"[DEBUG] Song initialized: folder_name={self.folder_name}, file_basename={self.file_basename}", file=sys.stderr, flush=True)
 
     def _clean_name(self, name):
         return name.replace(':','').replace('?','').replace(';','').replace('<','').replace('>','').replace('*','').replace('|','').replace('/','').replace('\\','').replace('"','').replace("'","'").replace('á','a').replace('à','a').replace('ù','u').replace('Ä','A')
@@ -584,28 +587,31 @@ class Song():
             if result.returncode != 0:
                 if not quiet:
                     print(f"Primary download failed for {self.name}, trying backup...")
-                # Try backup URL
                 download_cmd[-1] = self.backupvid
                 result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
                 
                 if result.returncode != 0:
                     raise Exception(f"Both downloads failed: {result.stderr}")
             
-            # Find the actual downloaded file (yt-dlp might change the extension)
             for file in os.listdir(self.folder_name):
                 if file.startswith(self.file_basename) and file.endswith('.mp3'):
                     self.file = os.path.join(self.folder_name, file)
+                    print(f"[DEBUG] Downloaded file saved at: {self.file}", flush=True)
+                    print(f"[DEBUG] Downloaded file saved at: {self.file}", file=sys.stderr, flush=True)
                     break
             else:
-                # If no mp3 found, look for any file with our name and rename it
                 for file in os.listdir(self.folder_name):
                     if file.startswith(self.file_basename):
                         old_path = os.path.join(self.folder_name, file)
                         os.rename(old_path, final_path)
                         self.file = final_path
+                        print(f"[DEBUG] Downloaded file renamed to: {self.file}", flush=True)
+                        print(f"[DEBUG] Downloaded file renamed to: {self.file}", file=sys.stderr, flush=True)
                         break
                 else:
                     self.file = final_path
+                    print(f"[DEBUG] Downloaded file defaulted to: {self.file}", flush=True)
+                    print(f"[DEBUG] Downloaded file defaulted to: {self.file}", file=sys.stderr, flush=True)
                     
         except Exception as e:
             if not quiet:

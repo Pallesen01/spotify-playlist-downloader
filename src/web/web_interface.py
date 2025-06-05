@@ -111,7 +111,7 @@ def downloader_loop():
 
                 # Start the downloader subprocess and store it globally
                 process = subprocess.Popen(
-                    [sys.executable, '-m', 'src.core.playlist_downloader', playlist['url']],
+                    [sys.executable, '-u', '-m', 'src.core.playlist_downloader', playlist['url']],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,

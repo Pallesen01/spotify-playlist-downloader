@@ -70,24 +70,15 @@ def download_song(track, playlist_name):
         playlist_dir = os.path.join(PROJECT_ROOT, playlist_name)
         os.makedirs(playlist_dir, exist_ok=True)
         
-        # Use spotdl command line
-        import subprocess
-        
-        # Construct the search query
-        search_query = f"{track_name} {artist_name}"
-        
-        # Run spotdl command
-        result = subprocess.run(
-            ['spotdl', '--output', playlist_dir, search_query],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode != 0:
-            raise Exception(f"spotdl failed: {result.stderr}")
-        print(f"Finished: {song_id}")
-        return True
-        
+        # Always use custom Song logic for correct folder structure
+        song_obj = Song(track, playlist_name)
+        downloadSong(song_obj, quiet=False)
+        if song_obj.file and os.path.exists(song_obj.file):
+            print(f"Finished: {song_id}")
+            return True
+        else:
+            print(f"Error downloading {song_id} with custom logic", flush=True)
+            return False
     except Exception as e:
         print(f"Error downloading {song_id}: {str(e)}", file=sys.stderr)
         return False
@@ -137,6 +128,9 @@ def main():
     # Force unbuffered output
     sys.stdout.reconfigure(line_buffering=True)
     sys.stderr.reconfigure(line_buffering=True)
+    
+    print("[DEBUG] Starting download process", flush=True)
+    print("[DEBUG] Starting download process", file=sys.stderr, flush=True)
     
     try:
         # Initialize Spotify client

@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Create Music directory if it doesn't exist
-mkdir -p "$HOME/Desktop/Music"
-
 # Install required dependencies
 echo "Installing dependencies..."
 pip install spotipy yt-dlp pafy beautifulsoup4 pytube eyed3 requests > /dev/null 2>&1

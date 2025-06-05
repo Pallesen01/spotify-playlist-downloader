@@ -1,13 +1,26 @@
-import urllib, pafy, os, spotipy, subprocess, eyed3, requests, youtube_dl
+import urllib, os, spotipy, subprocess, eyed3, requests
 from bs4 import BeautifulSoup
 from pytube import YouTube
+
+# Set pafy backend before importing
+import os as os_env
+os_env.environ['PAFY_BACKEND'] = 'internal'
+
+try:
+    import pafy
+except ImportError:
+    pafy = None
+    print("Warning: pafy not available, using yt-dlp only")
 
 #download a song using song object
 def downloadSong(song):
     print("Downloading", song.name)
     song.download()
-    song.set_file_attributes()
-    print(song.name, "Downloaded")
+    if song.file and os.path.exists(song.file):
+        song.set_file_attributes()
+        print(song.name, "Downloaded")
+    else:
+        print(f"Failed to download {song.name}")
 
 # returns a list of all track objects from a playlist
 def getTracks(playlist_url, sp):
@@ -94,7 +107,7 @@ class Song():
     def __init__(self, track, folder_name):
         self.track = track
         self.name = track['name']
-        self.name_file = track['name'].replace(':','').replace('?','').replace(';','').replace('<','').replace('>','').replace('*','').replace('|','').replace('/','').replace('\\','').replace('"','').replace('‘','\'').replace('á','a').replace('à','a').replace('ù','u').replace('Ä','A').replace("’","'")
+        self.name_file = track['name'].replace(':','').replace('?','').replace(';','').replace('<','').replace('>','').replace('*','').replace('|','').replace('/','').replace('\\','').replace('"','').replace("'","'").replace('á','a').replace('à','a').replace('ù','u').replace('Ä','A')
         self.artists = [artist['name'] for artist in track['artists']]
         self.duration = int(track['duration_ms']/1000)
         dur_mins = str(float(track['duration_ms']/1000/60)).split('.')
@@ -167,7 +180,10 @@ class Song():
             
             # Try to create pafy object for compatibility
             try:
-                self.video = pafy.new(closestVideo)
+                if pafy:
+                    self.video = pafy.new(closestVideo)
+                else:
+                    self.video = None
             except:
                 self.video = None
                 
@@ -228,13 +244,13 @@ class Song():
                         self.file = final_path
                         break
                 else:
-                    self.file = final_path
+                                        self.file = final_path
                     
         except Exception as e:
             print(f"yt-dlp failed for {self.name}: {e}")
             # Fallback to old method
             try:
-                if self.video:
+                if self.video and pafy:
                     self.video.getbestaudio().download(filepath=os.path.join(self.folder_name, self.name_file))
                     
                     FNULL = open(os.devnull, 'w')
@@ -243,7 +259,7 @@ class Song():
                     os.remove(os.path.join(self.folder_name, self.name_file))
                     self.file = final_path
                 else:
-                    raise Exception("No video object available")
+                    raise Exception("No pafy/video object available")
                     
             except Exception as e2:
                 print(f"All download methods failed for {self.name}: {e2}")

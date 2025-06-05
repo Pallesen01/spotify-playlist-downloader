@@ -15,6 +15,7 @@ ffmpeg -version >nul 2>&1
 if errorlevel 1 (
     echo Installing ffmpeg...
     winget install --id=Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements >nul 2>&1
+    echo FFmpeg installed. You may need to restart your terminal for it to work.
 )
 
 :: Set pafy to use internal backend instead of youtube-dl

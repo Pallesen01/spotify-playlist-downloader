@@ -57,6 +57,21 @@ To download only the first N songs, provide the `--limit` option:
 python playlist_downloader.py <playlist_url> --limit N
 ```
 
+## Web Interface
+
+You can optionally start a simple web interface which lets you add playlist URLs
+through a browser. The server keeps a persistent list of playlists and will
+download them all once an hour.
+
+Run the interface with:
+
+```bash
+python web_interface.py
+```
+
+Open `http://localhost:5000` in your browser to manage playlists and start the
+automatic downloader.
+
 If you prefer to authenticate through your web browser instead of providing a
 client ID and secret, add the `--user-auth` flag. A browser window will open so
 you can log into Spotify:

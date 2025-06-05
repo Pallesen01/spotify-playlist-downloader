@@ -4,7 +4,7 @@ if not exist "%USERPROFILE%\Desktop\Music" mkdir "%USERPROFILE%\Desktop\Music"
 
 :: Install required dependencies
 echo Installing dependencies...
-pip install spotipy yt-dlp pafy beautifulsoup4 pytube eyed3 requests tqdm >nul 2>&1
+pip install -r "%~dp0requirements.txt" >nul 2>&1
 
 :: Install optional high-quality providers (ignore errors if they fail)
 echo Installing optional providers...

@@ -5,7 +5,7 @@ export PAFY_BACKEND=internal
 
 # Install required dependencies
 echo "Installing dependencies..."
-pip install spotipy yt-dlp pafy beautifulsoup4 pytube eyed3 requests tqdm > /dev/null 2>&1
+pip install -r "$(dirname "$0")/requirements.txt" > /dev/null 2>&1
 
 # Install optional high-quality providers (ignore errors if they fail)
 echo "Installing optional providers..."

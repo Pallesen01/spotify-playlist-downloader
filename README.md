@@ -9,6 +9,9 @@ The YouTube search logic now scores results using fuzzy title matching and
 duration similarity which helps select the official or most accurate audio
 track for each song.
 
+Album artwork is now removed as soon as all tracks from that album have been
+processed rather than waiting until the end of the run.
+
 ## Usage
 
 Run `playlist_downloader.py` with the playlist URL:

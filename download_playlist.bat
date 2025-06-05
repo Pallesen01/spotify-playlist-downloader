@@ -4,7 +4,7 @@ if not exist "%USERPROFILE%\Desktop\Music" mkdir "%USERPROFILE%\Desktop\Music"
 
 :: Install required dependencies
 echo Installing dependencies...
-pip install spotipy yt-dlp pafy beautifulsoup4 pytube eyed3 requests >nul 2>&1
+pip install spotipy yt-dlp pafy beautifulsoup4 pytube eyed3 requests mutagen >nul 2>&1
 
 :: Check if ffmpeg is installed, install if not found
 ffmpeg -version >nul 2>&1

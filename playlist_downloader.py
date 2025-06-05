@@ -39,6 +39,13 @@ except IndexError:
 songs, folder_name = getTracks(playlist_url, sp)
 os.makedirs(folder_name, exist_ok=True)
 
+limit = os.getenv('SONG_LIMIT')
+if limit:
+    try:
+        songs = songs[:int(limit)]
+    except ValueError:
+        pass
+
 print("Checking already downloaded songs...")
 #get URIs of downloaded songs
 URIs = []
@@ -83,9 +90,11 @@ downloads_started = False
 import threading
 downloading_lock = threading.Lock()
 currently_downloading = []
+hifi_count_lock = threading.Lock()
+hifi_successes = 0
 
 def thread_download(song):
-    global downloads_started
+    global downloads_started, hifi_successes
     
     with downloading_lock:
         currently_downloading.append(song.name)
@@ -100,7 +109,10 @@ def thread_download(song):
             downloads_started = True
             progress_bar.start_t = progress_bar._time()
     
-    downloadSong(song, quiet=True)
+    hi_res = downloadSongHiFi(song, quiet=True)
+    if hi_res:
+        with hifi_count_lock:
+            hifi_successes += 1
     
     with downloading_lock:
         currently_downloading.remove(song.name)
@@ -139,4 +151,5 @@ print("Deleting images")
 deleteAllImages(folder_name)
 print("Deleting Removed Songs")
 delRemoved(playlistFolderURIs, songs, folder_name)
+print(f"HiFi successes: {hifi_successes} / {len(songs)}")
 print("Done")

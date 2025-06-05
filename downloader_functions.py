@@ -1,4 +1,5 @@
 import urllib, os, spotipy, subprocess, eyed3, requests
+from mutagen.flac import FLAC, Picture
 from bs4 import BeautifulSoup
 from pytube import YouTube
 
@@ -17,13 +18,30 @@ def downloadSong(song, quiet=False):
     if not quiet:
         print("Downloading", song.name)
     song.download(quiet=quiet)
+    success = False
     if song.file and os.path.exists(song.file):
         song.set_file_attributes(quiet=quiet)
+        success = True
         if not quiet:
             print(song.name, "Downloaded")
     else:
         if not quiet:
             print(f"Failed to download {song.name}")
+    return success
+
+def downloadSongHiFi(song, quiet=False):
+    if not quiet:
+        print("Downloading (HiFi)", song.name)
+    if song.download_high_quality(quiet=quiet):
+        if song.file and os.path.exists(song.file):
+            song.set_file_attributes(quiet=quiet)
+            if not quiet:
+                print(song.name, "Downloaded in HiFi")
+        return True
+    if not quiet:
+        print("Falling back to standard download for", song.name)
+    downloadSong(song, quiet=quiet)
+    return False
 
 # returns a list of all track objects from a playlist
 def getTracks(playlist_url, sp):
@@ -222,9 +240,106 @@ class Song():
             self.backupvid = self.closesturl
             self.video = None
 
+    def download_hifi(self, quiet=False):
+        import subprocess
 
+        self.get_link(quiet=quiet)
+        os.makedirs(self.folder_name, exist_ok=True)
 
-        
+        output_path = os.path.join(self.folder_name, self.name_file + ".%(ext)s")
+        final_path = os.path.join(self.folder_name, self.name_file + ".flac")
+
+        try:
+            download_cmd = [
+                'yt-dlp',
+                '--extract-audio',
+                '--audio-format', 'flac',
+                '--audio-quality', '0',
+                '--format', 'bestaudio',
+                '--output', output_path,
+                self.closesturl
+            ]
+
+            result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
+
+            if result.returncode != 0:
+                if not quiet:
+                    print(f"HiFi download failed for {self.name}, trying backup...")
+                download_cmd[-1] = self.backupvid
+                result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
+
+                if result.returncode != 0:
+                    raise Exception(result.stderr)
+
+            for file in os.listdir(self.folder_name):
+                if file.startswith(self.name_file) and file.endswith('.flac'):
+                    self.file = os.path.join(self.folder_name, file)
+                    break
+            else:
+                for file in os.listdir(self.folder_name):
+                    if file.startswith(self.name_file):
+                        old_path = os.path.join(self.folder_name, file)
+                        os.rename(old_path, final_path)
+                        self.file = final_path
+                        break
+                else:
+                    self.file = final_path
+
+            return True
+
+        except Exception as e:
+            if not quiet:
+                print(f"HiFi method failed for {self.name}: {e}")
+            return False
+
+    def download_soundcloud(self, quiet=False):
+        import subprocess
+
+        os.makedirs(self.folder_name, exist_ok=True)
+
+        search_query = f"scsearch1:{self.name} {self.artists[0]}"
+        output_path = os.path.join(self.folder_name, self.name_file + ".%(ext)s")
+        final_path = os.path.join(self.folder_name, self.name_file + ".flac")
+
+        try:
+            download_cmd = [
+                'yt-dlp',
+                '--extract-audio',
+                '--audio-format', 'flac',
+                '--audio-quality', '0',
+                '--format', 'bestaudio',
+                '--output', output_path,
+                search_query
+            ]
+
+            result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
+
+            if result.returncode != 0:
+                return False
+
+            for file in os.listdir(self.folder_name):
+                if file.startswith(self.name_file) and file.endswith('.flac'):
+                    self.file = os.path.join(self.folder_name, file)
+                    break
+            else:
+                for file in os.listdir(self.folder_name):
+                    if file.startswith(self.name_file):
+                        old_path = os.path.join(self.folder_name, file)
+                        os.rename(old_path, final_path)
+                        self.file = final_path
+                        break
+                else:
+                    self.file = final_path
+
+            return True
+
+        except Exception:
+            return False
+
+    def download_high_quality(self, quiet=False):
+        if self.download_soundcloud(quiet=quiet):
+            return True
+        return self.download_hifi(quiet=quiet)
 
     def download(self, quiet=False):
         import subprocess
@@ -341,53 +456,57 @@ class Song():
 
         return filename
 
-    # assigns id3 attributes to mp3 file
+    # assigns metadata to the downloaded file
     def set_file_attributes(self, quiet=False):
-        #TEMP SET VAR
-        self.file = os.path.join(self.folder_name, self.name_file)+".mp3"
-
-        # Check if file exists first
-        if not os.path.exists(self.file):
+        if not self.file or not os.path.exists(self.file):
             if not quiet:
                 print(f"Cannot set attributes: file {self.file} does not exist")
             return
 
         try:
-            audiofile = eyed3.load(self.file)
-            
-            # Check if eyed3 successfully loaded the file
-            if audiofile is None or audiofile.tag is None:
-                if not quiet:
-                    print(f"Cannot set attributes: {self.file} is not a valid audio file")
-                return
-
-        except TypeError as e:
+            self.art = self.download_art(quiet=quiet)
+        except FileNotFoundError:
             if not quiet:
-                print("Error loading song for setting attributes")
-                print(e)
-            return
+                print("Error setting art for", self.name)
 
-        try:
+        ext = os.path.splitext(self.file)[1].lower()
+
+        if ext == '.flac':
             try:
-                self.art = self.download_art(quiet=quiet)
-            except FileNotFoundError:
+                audiofile = FLAC(self.file)
+                audiofile['artist'] = ', '.join(self.artists)
+                audiofile['album'] = self.album
+                audiofile['title'] = self.name
+                audiofile['publisher'] = self.uri
+                if os.path.exists(self.art):
+                    pic = Picture()
+                    pic.type = 3
+                    pic.mime = 'image/jpeg'
+                    with open(self.art, 'rb') as img:
+                        pic.data = img.read()
+                    audiofile.add_picture(pic)
+                audiofile.save()
+            except Exception as e:
                 if not quiet:
-                    print("Error setting art for", self.name)
-                    print(Exception)
-            audiofile.tag.artist = ', '.join(self.artists)
-            audiofile.tag.album = self.album
-            audiofile.tag.title = self.name
-            audiofile.tag.publisher = self.uri
+                    print("Error setting FLAC attributes")
+                    print(e)
+        else:
             try:
-                audiofile.tag.images.set(3, open(self.art,'rb').read(), 'image/jpeg')
-            except:
-                pass
-            audiofile.tag.save(self.file)
-
-        except AttributeError as e:
-            if not quiet:
-                print("Error setting file attributes")
-                print(e)
-
-        except UnboundLocalError:
-            pass
+                audiofile = eyed3.load(self.file)
+                if audiofile is None or audiofile.tag is None:
+                    if not quiet:
+                        print(f"Cannot set attributes: {self.file} is not a valid audio file")
+                    return
+                audiofile.tag.artist = ', '.join(self.artists)
+                audiofile.tag.album = self.album
+                audiofile.tag.title = self.name
+                audiofile.tag.publisher = self.uri
+                try:
+                    audiofile.tag.images.set(3, open(self.art,'rb').read(), 'image/jpeg')
+                except Exception:
+                    pass
+                audiofile.tag.save(self.file)
+            except Exception as e:
+                if not quiet:
+                    print("Error setting file attributes")
+                    print(e)

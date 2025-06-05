@@ -1,0 +1,5 @@
+Agents.md
+__pycache__/
+spotify_data*
+run.log
+.cache/

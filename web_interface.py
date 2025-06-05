@@ -7,9 +7,19 @@ import sys
 from flask import Flask, request, redirect, render_template_string
 
 PLAYLIST_FILE = 'playlists.json'
+CONFIG_FILE = 'config.json'
 INTERVAL = 3600  # 1 hour
 
 app = Flask(__name__)
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            try:
+                return json.load(f)
+            except Exception:
+                return {}
+    return {}
 
 def load_playlists():
     if os.path.exists(PLAYLIST_FILE):
@@ -31,9 +41,24 @@ HTML_TEMPLATE = """
 <html>
 <head>
     <title>Spotify Playlist Downloader</title>
+    <style>
+        .warning {
+            color: #856404;
+            background-color: #fff3cd;
+            border: 1px solid #ffeeba;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+    </style>
 </head>
 <body>
     <h1>Spotify Playlist Downloader</h1>
+    {% if not has_credentials %}
+    <div class="warning">
+        <p>⚠️ Spotify credentials not configured. Please add your Spotify client ID and secret to config.json</p>
+    </div>
+    {% endif %}
     <form action="/add" method="post">
         <input type="text" name="url" placeholder="Playlist URL" required>
         <button type="submit">Add Playlist</button>
@@ -64,7 +89,9 @@ def downloader_loop():
 @app.route('/')
 def index():
     playlists = load_playlists()
-    return render_template_string(HTML_TEMPLATE, playlists=playlists)
+    config = load_config()
+    has_credentials = bool(config.get('spotify', {}).get('client_id') and config.get('spotify', {}).get('client_secret'))
+    return render_template_string(HTML_TEMPLATE, playlists=playlists, has_credentials=has_credentials)
 
 
 @app.route('/add', methods=['POST'])

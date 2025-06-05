@@ -126,11 +126,11 @@ class Song():
         try:
             # Use yt-dlp to search YouTube
             search_cmd = [
-                'yt-dlp', 
-                '--dump-json', 
+                'yt-dlp',
+                '--dump-json',
                 '--no-download',
                 '--flat-playlist',
-                f'ytsearch5:{textToSearch}'
+                f'ytsearch15:{textToSearch}'
             ]
             
             result = subprocess.run(search_cmd, capture_output=True, text=True, timeout=30)
@@ -154,26 +154,37 @@ class Song():
             if not videos:
                 raise Exception("No videos found")
             
-            # Find closest duration match
-            closestVideo = None
-            closestDur = None
+            # Score videos based on title similarity and duration difference
+            import difflib
+
+            query = (self.name + ' ' + self.artists[0]).lower()
+            bestScore = None
+            bestVideo = None
             backupVid = None
-            
-            for video in videos[:3]:
+
+            for video in videos:
+                title = video['title'].lower()
+                ratio = difflib.SequenceMatcher(None, query, title).ratio()
+                penalty = 0
                 if video['duration']:
-                    durDiff = abs(video['duration'] - self.duration)
-                    if closestDur is None or durDiff < closestDur:
-                        backupVid = closestVideo
-                        closestDur = durDiff
-                        closestVideo = video['url']
-            
-            # Fallback to first video if no duration matching worked
-            if closestVideo is None:
-                closestVideo = videos[0]['url']
+                    penalty = abs(video['duration'] - self.duration) / self.duration
+                if any(word in title for word in ['cover', 'karaoke', 'live', 'remix', 'instrumental']):
+                    ratio *= 0.8
+                score = ratio - penalty * 0.1
+
+                if bestScore is None or score > bestScore:
+                    backupVid = bestVideo
+                    bestScore = score
+                    bestVideo = video['url']
+
+            if bestVideo is None:
+                bestVideo = videos[0]['url']
             if backupVid is None and len(videos) > 1:
                 backupVid = videos[1]['url']
             elif backupVid is None:
-                backupVid = closestVideo
+                backupVid = bestVideo
+
+            closestVideo = bestVideo
                 
             self.closesturl = closestVideo
             self.backupvid = backupVid

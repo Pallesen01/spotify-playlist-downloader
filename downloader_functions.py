@@ -555,11 +555,13 @@ class Song():
 
     # download a file from a url | returns file location
     def download_art(self, quiet=False):
-        filename = os.path.join(self.folder_name, self.album + '.jpg')
+        # Clean album name for filename
+        clean_album = self.album.replace(':','').replace('?','').replace(';','').replace('<','').replace('>','').replace('*','').replace('|','').replace('/','').replace('\\','').replace('"','').replace("'","'")
+        filename = os.path.join(self.folder_name, clean_album + '.jpg')
 
         # check if file is already downloaded
         for file in os.listdir(self.folder_name):
-            if self.album + '.jpg' == file:
+            if clean_album + '.jpg' == file:
                 return filename
                 
         if not quiet:
@@ -567,34 +569,33 @@ class Song():
         try:
             res = requests.get(self.art_urls[0])
             res.raise_for_status()
+            
+            # Create a safe temporary filename
+            import tempfile
+            temp_filename = os.path.join(self.folder_name, f"temp_art_{hash(self.art_urls[0]) % 10000}.jpg")
                 
-            # Save the file to file location
-            file = open(os.path.join(self.folder_name, os.path.basename(self.art_urls[0])), 'wb')
-            for chunk in res.iter_content(100000):
-                file.write(chunk)
-            file.close()
+            # Save the file to temp location first
+            with open(temp_filename, 'wb') as file:
+                for chunk in res.iter_content(100000):
+                    file.write(chunk)
+            
+            # Rename to final filename
+            try:
+                if os.path.exists(filename):
+                    os.remove(filename)
+                os.rename(temp_filename, filename)
+            except Exception as e:
+                if not quiet:
+                    print(f"Error renaming art file: {e}")
+                # If rename fails, just use the temp file
+                filename = temp_filename
+                
         except requests.exceptions.MissingSchema:
-            print('Error requests.exceptions.MissingSchema')
-
-        except FileExistsError:
-            pass
-
-        #find then rename file to filename specified
-        for file in os.listdir(self.folder_name):
-            if file == self.art_urls[0].split('/')[-1]:
-                try:
-                    #print(file)
-                    #print(os.path.join(self.folder_name, file))
-                    #print(filename)
-                    try:
-                        os.rename(os.path.join(self.folder_name, file),filename)
-                    except:
-                        pass
-
-                except FileExistsError:
-                    pass
-
-                return filename
+            if not quiet:
+                print('Error requests.exceptions.MissingSchema')
+        except Exception as e:
+            if not quiet:
+                print(f"Error downloading album art: {e}")
 
         return filename
 

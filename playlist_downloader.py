@@ -1,4 +1,5 @@
 import spotipy, os, urllib, pafy, shelve, threading, sys
+from tqdm import tqdm
 from spotipy.oauth2 import SpotifyClientCredentials
 from downloader_functions import *
 from bs4 import BeautifulSoup
@@ -66,10 +67,16 @@ for song in songs:
     else:
         downloadQueue.append(song)
 
+progress_bar = tqdm(total=len(downloadQueue), desc="Downloading Songs", unit="song")
+
+def thread_download(song):
+    downloadSong(song)
+    progress_bar.update(1)
+
 #While there are songs in download queue download songs
 while len(downloadQueue) > 0:
     if len(threadList) <= 4:
-        threadObj = threading.Thread(target=downloadSong, args=[downloadQueue.pop(0)])
+        threadObj = threading.Thread(target=thread_download, args=[downloadQueue.pop(0)])
         threadObj.handled = False
         threadList.append(threadObj)
         threadObj.start()

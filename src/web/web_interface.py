@@ -7,12 +7,14 @@ import sys
 from flask import Flask, request, redirect, render_template, jsonify
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
+import datetime
 
 # Get the project root directory
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PLAYLIST_FILE = os.path.join(PROJECT_ROOT, 'playlists.json')
 CONFIG_FILE = os.path.join(PROJECT_ROOT, 'config.json')
 INTERVAL = 3600  # 1 hour
+next_sync_time = None  # Global for next sync time
 
 app = Flask(__name__)
 
@@ -85,7 +87,7 @@ def get_playlist_info(url):
         return None
 
 def downloader_loop():
-    global downloader_running, current_progress, current_downloader_process
+    global downloader_running, current_progress, current_downloader_process, next_sync_time
     while downloader_running:
         try:
             playlists = load_playlists()
@@ -197,8 +199,16 @@ def downloader_loop():
 
             if downloader_running:
                 current_progress['status'] = 'completed'
-                current_progress['stage'] = 'Completed.'
-                time.sleep(INTERVAL)
+                next_sync_time = datetime.datetime.now() + datetime.timedelta(seconds=INTERVAL)
+                while downloader_running:
+                    now = datetime.datetime.now()
+                    seconds_left = int((next_sync_time - now).total_seconds())
+                    if seconds_left <= 0:
+                        break
+                    minutes_left = (seconds_left + 59) // 60
+                    current_progress['stage'] = f"Waiting for next sync in {minutes_left} minute{'s' if minutes_left != 1 else ''}..."
+                    time.sleep(10)  # Update every 10 seconds for better accuracy
+                # After waiting, loop will restart
         except Exception as e:
             current_progress['error'] = str(e)
             current_progress['status'] = 'error'
@@ -212,6 +222,7 @@ def downloader_loop():
     current_progress['error'] = None
     current_progress['stage'] = 'Idle.'
     current_downloader_process = None
+    next_sync_time = None
 
 @app.route('/')
 def index():
@@ -270,6 +281,22 @@ def stop_downloader():
 @app.route('/progress')
 def get_progress():
     return jsonify(current_progress)
+
+@app.route('/reorder', methods=['POST'])
+def reorder_playlists():
+    data = request.get_json()
+    new_order = data.get('order', [])
+    playlists = load_playlists()
+    # Create a mapping from URL to playlist object
+    playlist_map = {p['url']: p for p in playlists}
+    # Reorder playlists based on the new order
+    reordered = [playlist_map[url] for url in new_order if url in playlist_map]
+    # If any playlists were not included (shouldn't happen), append them at the end
+    for p in playlists:
+        if p['url'] not in new_order:
+            reordered.append(p)
+    save_playlists(reordered)
+    return ('', 204)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000) 

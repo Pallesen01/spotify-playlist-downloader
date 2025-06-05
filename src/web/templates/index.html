@@ -110,6 +110,13 @@
 <body>
     <h1>Spotify Playlist Downloader</h1>
     
+    <!-- Download directory selection form -->
+    <form action="/set_download_directory" method="POST" style="margin-bottom: 18px; display: flex; align-items: center; gap: 10px;">
+        <label for="download_directory" style="font-weight: bold;">Download directory:</label>
+        <input type="text" name="download_directory" id="download_directory" value="{{ download_directory }}" style="width: 350px; padding: 7px;">
+        <button type="submit" style="background:#1DB954; color:white; padding:7px 16px; border-radius:4px; border:none;">Set</button>
+    </form>
+
     <div class="form-group" style="margin-bottom: 10px;">
         <button id="showIntervalFormBtn" style="background:#1DB954; color:white; padding:7px 16px; border-radius:4px; border:none; margin-bottom:6px;">Change sync interval</button>
         <form id="intervalForm" action="/set_interval" method="POST" style="display:none; margin-top:8px; align-items: center; gap: 10px;">
@@ -120,12 +127,6 @@
         </form>
         <div style="color:#666; font-size:0.95em; margin-top:4px;">Current sync interval: <b>{{ interval_minutes }}</b> minute{% if interval_minutes != 1 %}s{% endif %}</div>
     </div>
-
-    {% if not has_credentials %}
-    <div class="warning">
-        Warning: Spotify credentials are not configured. Please add your Spotify client ID and secret to config.json.
-    </div>
-    {% endif %}
 
     <div class="form-group">
         <form action="/add" method="POST">
@@ -179,6 +180,19 @@
             <button type="submit" class="start-button">Start Downloader</button>
         </form>
         {% endif %}
+    </div>
+
+    <!-- Top right login/logout button -->
+    <div style="position: absolute; top: 20px; right: 20px; z-index: 10;">
+    {% if not is_authorized %}
+        <form action="/login" method="get" style="display:inline;">
+            <button type="submit" style="background:#1DB954; color:white; padding:7px 16px; border-radius:4px; border:none;">Login with Spotify</button>
+        </form>
+    {% else %}
+        <form action="/logout" method="get" style="display:inline;">
+            <button type="submit" style="background:#e74c3c; color:white; padding:7px 16px; border-radius:4px; border:none;">Logout</button>
+        </form>
+    {% endif %}
     </div>
 
     <script>

@@ -4,6 +4,7 @@ from pytube import YouTube
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict, Any
 import sys
+import shutil
 
 # Set pafy backend before importing
 import os as os_env
@@ -555,72 +556,51 @@ class Song():
     def download(self, quiet=False):
         import subprocess
 
-        # Try high quality download sources in order
+        # Try spotdl first
+        if download_with_spotdl(self, quiet=quiet):
+            return
         if download_from_qobuz(self, quiet=quiet):
             return
-        if download_from_bandcamp(self, quiet=quiet):
-            return
+        # Bandcamp fallback disabled for speed
+        # if download_from_bandcamp(self, quiet=quiet):
+        #     return
         if download_from_soundcloud(self, quiet=quiet):
             return
         if download_from_jamendo(self, quiet=quiet):
             return
-
         self.get_link(quiet=quiet)
         os.makedirs(self.folder_name, exist_ok=True)
-
         output_path = os.path.join(self.folder_name, self.file_basename + ".%(ext)s")
         final_path = os.path.join(self.folder_name, self.file_basename + ".mp3")
-        
         try:
-            # Use yt-dlp to download directly as mp3
             download_cmd = [
                 'yt-dlp',
                 '--extract-audio',
                 '--audio-format', 'mp3',
-                '--audio-quality', '0',  # best quality
+                '--audio-quality', '0',
                 '--output', output_path,
                 self.closesturl
             ]
-            
             result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
-            
             if result.returncode != 0:
                 if not quiet:
                     print(f"Primary download failed for {self.name}, trying backup...")
                 download_cmd[-1] = self.backupvid
                 result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
-                
                 if result.returncode != 0:
                     raise Exception(f"Both downloads failed: {result.stderr}")
-            
-            for file in os.listdir(self.folder_name):
-                if file.startswith(self.file_basename) and file.endswith('.mp3'):
-                    self.file = os.path.join(self.folder_name, file)
-                    print(f"[DEBUG] Downloaded file saved at: {self.file}", flush=True)
-                    print(f"[DEBUG] Downloaded file saved at: {self.file}", file=sys.stderr, flush=True)
+            for f in os.listdir(self.folder_name):
+                if f.startswith(self.file_basename):
+                    self.file = os.path.join(self.folder_name, f)
                     break
-            else:
-                for file in os.listdir(self.folder_name):
-                    if file.startswith(self.file_basename):
-                        old_path = os.path.join(self.folder_name, file)
-                        os.rename(old_path, final_path)
-                        self.file = final_path
-                        print(f"[DEBUG] Downloaded file renamed to: {self.file}", flush=True)
-                        print(f"[DEBUG] Downloaded file renamed to: {self.file}", file=sys.stderr, flush=True)
-                        break
-                else:
-                    self.file = final_path
-                    print(f"[DEBUG] Downloaded file defaulted to: {self.file}", flush=True)
-                    print(f"[DEBUG] Downloaded file defaulted to: {self.file}", file=sys.stderr, flush=True)
-                    
+            if not self.file:
+                self.file = final_path
         except Exception as e:
             if not quiet:
                 print(f"yt-dlp failed for {self.name}: {e}")
-            # Fallback to old method
             try:
                 if self.video and pafy:
                     self.video.getbestaudio().download(filepath=os.path.join(self.folder_name, self.file_basename))
-                    
                     FNULL = open(os.devnull, 'w')
                     if not quiet:
                         print("Converting", self.name)
@@ -629,7 +609,6 @@ class Song():
                     self.file = final_path
                 else:
                     raise Exception("No pafy/video object available")
-                    
             except Exception as e2:
                 if not quiet:
                     print(f"All download methods failed for {self.name}: {e2}")
@@ -778,3 +757,31 @@ def _resolve_freesound_url(query):
 #     direct_download=True
 # ))
 # download_from_freesound = create_provider_function('freesound')
+
+def download_with_spotdl(song, quiet=False):
+    """Try to download the song using spotdl CLI."""
+    os.makedirs(song.folder_name, exist_ok=True)
+    output_path = os.path.join(song.folder_name, song.file_basename + '.mp3')
+    # Build search query
+    query = f"{song.name} {song.artists[0]}"
+    cmd = [
+        'spotdl',
+        'download',
+        query,
+        '--output', output_path
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0 and os.path.exists(output_path):
+            song.file = output_path
+            if not quiet:
+                print(f"spotdl succeeded for {song.name}")
+            return True
+        else:
+            if not quiet:
+                print(f"spotdl failed for {song.name}: {result.stderr}")
+            return False
+    except Exception as e:
+        if not quiet:
+            print(f"spotdl exception for {song.name}: {e}")
+        return False

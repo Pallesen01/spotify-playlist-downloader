@@ -13,6 +13,7 @@ import datetime
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PLAYLIST_FILE = os.path.join(PROJECT_ROOT, 'playlists.json')
 CONFIG_FILE = os.path.join(PROJECT_ROOT, 'config.json')
+USER_TOKEN_FILE = os.path.join(PROJECT_ROOT, 'user_token.json')
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -62,7 +63,46 @@ def save_playlists(playlists):
     with open(PLAYLIST_FILE, 'w') as f:
         json.dump(playlists, f)
 
+# --- Spotify OAuth Logic ---
+def get_user_token():
+    if os.path.exists(USER_TOKEN_FILE):
+        with open(USER_TOKEN_FILE, 'r') as f:
+            try:
+                return json.load(f)
+            except Exception:
+                return None
+    return None
+
+def save_user_token(token_info):
+    with open(USER_TOKEN_FILE, 'w') as f:
+        json.dump(token_info, f)
+
+def clear_user_token():
+    if os.path.exists(USER_TOKEN_FILE):
+        os.remove(USER_TOKEN_FILE)
+
+def get_spotify_oauth():
+    config = load_config()
+    client_id = config.get('spotify', {}).get('client_id')
+    client_secret = config.get('spotify', {}).get('client_secret')
+    redirect_uri = config.get('spotify', {}).get('redirect_uri', 'http://127.0.0.1:5000/callback')
+    scope = 'playlist-read-private playlist-read-collaborative'
+    return spotipy.oauth2.SpotifyOAuth(client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri, scope=scope, cache_path=None)
+
 def get_spotify_client():
+    token_info = get_user_token()
+    if token_info and 'access_token' in token_info:
+        # Check if token is expired and refresh if needed
+        oauth = get_spotify_oauth()
+        if oauth.is_token_expired(token_info):
+            try:
+                token_info = oauth.refresh_access_token(token_info['refresh_token'])
+                save_user_token(token_info)
+            except Exception:
+                clear_user_token()
+                return None
+        return spotipy.Spotify(auth=token_info['access_token'])
+    # Fallback to client credentials
     config = load_config()
     client_id = config.get('spotify', {}).get('client_id')
     client_secret = config.get('spotify', {}).get('client_secret')
@@ -93,6 +133,16 @@ def get_playlist_info(url):
     except Exception:
         return None
 
+def get_download_directory():
+    config = load_config()
+    return config.get('download_directory', PROJECT_ROOT)
+
+def set_download_directory(new_dir):
+    config = load_config()
+    config['download_directory'] = new_dir
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f)
+
 def downloader_loop():
     global downloader_running, current_progress, current_downloader_process, next_sync_time
     while downloader_running:
@@ -109,7 +159,7 @@ def downloader_loop():
 
                 sys.path.insert(0, PROJECT_ROOT)
 
-                # Start the downloader subprocess and store it globally
+                # Pass the download directory as an environment variable
                 process = subprocess.Popen(
                     [sys.executable, '-u', '-m', 'src.core.playlist_downloader', playlist['url']],
                     stdout=subprocess.PIPE,
@@ -117,7 +167,7 @@ def downloader_loop():
                     text=True,
                     bufsize=1,
                     universal_newlines=True,
-                    env={**os.environ, 'PYTHONUNBUFFERED': '1'}
+                    env={**os.environ, 'PYTHONUNBUFFERED': '1', 'SPOTDL_DOWNLOAD_DIR': get_download_directory()}
                 )
                 current_downloader_process = process
 
@@ -242,11 +292,17 @@ def index():
     config = load_config()
     has_credentials = bool(config.get('spotify', {}).get('client_id') and config.get('spotify', {}).get('client_secret'))
     interval_minutes = int(config.get('sync_interval_minutes', 60))
+    # Check if user is authorized
+    user_token = get_user_token()
+    is_authorized = user_token and 'access_token' in user_token
+    download_directory = get_download_directory()
     return render_template('index.html', 
                          playlists=playlists, 
                          has_credentials=has_credentials,
+                         is_authorized=is_authorized,
                          downloader_running=downloader_running,
-                         interval_minutes=interval_minutes)
+                         interval_minutes=interval_minutes,
+                         download_directory=download_directory)
 
 @app.route('/add', methods=['POST'])
 def add_playlist():
@@ -325,6 +381,37 @@ def set_interval():
         INTERVAL = interval * 60
     except Exception:
         pass
+    return redirect('/')
+
+@app.route('/login')
+def login():
+    oauth = get_spotify_oauth()
+    auth_url = oauth.get_authorize_url()
+    return redirect(auth_url)
+
+@app.route('/callback')
+def callback():
+    oauth = get_spotify_oauth()
+    code = request.args.get('code')
+    if not code:
+        return redirect('/')
+    try:
+        token_info = oauth.get_access_token(code, as_dict=True)
+        save_user_token(token_info)
+    except Exception:
+        return 'Authorization failed', 400
+    return redirect('/')
+
+@app.route('/logout')
+def logout():
+    clear_user_token()
+    return redirect('/')
+
+@app.route('/set_download_directory', methods=['POST'])
+def set_download_directory_route():
+    new_dir = request.form.get('download_directory')
+    if new_dir and os.path.isdir(new_dir):
+        set_download_directory(new_dir)
     return redirect('/')
 
 if __name__ == '__main__':

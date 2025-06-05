@@ -47,31 +47,32 @@ def get_spotify_client():
     client_credentials_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
     return spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
+def get_download_directory():
+    config = load_config()
+    return config.get('download_directory', PROJECT_ROOT)
+
 def get_downloaded_songs(playlist_name):
-    playlist_dir = os.path.join(PROJECT_ROOT, playlist_name)
+    download_dir = get_download_directory()
+    playlist_dir = os.path.join(download_dir, playlist_name)
     if not os.path.exists(playlist_dir):
         return set()
-    
     downloaded = set()
     for file in os.listdir(playlist_dir):
         if file.endswith('.mp3'):
-            # Remove .mp3 extension and add to set
             downloaded.add(os.path.splitext(file)[0])
     return downloaded
 
 def download_song(track, playlist_name):
     try:
-        # Get track info
         track_name = track['name']
         artist_name = track['artists'][0]['name']
         song_id = f"{track_name} - {artist_name}"
-        
-        # Create playlist directory if it doesn't exist
-        playlist_dir = os.path.join(PROJECT_ROOT, playlist_name)
+        download_dir = get_download_directory()
+        playlist_dir = os.path.join(download_dir, playlist_name)
         os.makedirs(playlist_dir, exist_ok=True)
-        
-        # Always use custom Song logic for correct folder structure
         song_obj = Song(track, playlist_name)
+        # Patch the Song object to use the correct folder
+        song_obj.folder_name = os.path.join(download_dir, playlist_name, song_obj.artist_folder, song_obj.album_folder_with_year)
         downloadSong(song_obj, quiet=False)
         if song_obj.file and os.path.exists(song_obj.file):
             print(f"Finished: {song_id}")
@@ -117,6 +118,20 @@ def thread_download(song, progress_bar, folder_name):
         
         progress_bar.update(1)
         progress_bar.refresh()  # Force refresh after update
+
+def write_m3u8_playlist(playlist_name, download_dir):
+    playlists_dir = os.path.join(download_dir, '1 - Playlists')
+    os.makedirs(playlists_dir, exist_ok=True)
+    m3u8_path = os.path.join(playlists_dir, f'{playlist_name}.m3u8')
+    playlist_folder = os.path.join(download_dir, playlist_name)
+    mp3_files = []
+    for root, _, files in os.walk(playlist_folder):
+        for file in files:
+            if file.endswith('.mp3'):
+                mp3_files.append(os.path.relpath(os.path.join(root, file), playlists_dir))
+    with open(m3u8_path, 'w', encoding='utf-8') as f:
+        for rel_path in sorted(mp3_files):
+            f.write(rel_path + '\n')
 
 def main():
     if len(sys.argv) != 2:
@@ -166,11 +181,10 @@ def main():
                 break
         print(f"All tracks fetched: {len(tracks)} total.")
         playlist_name = playlist['name']
-        # Get total number of tracks (already set above)
         print(f"Found {total_tracks} tracks in playlist: {playlist_name}")
         print("Checking already downloaded songs...")
         downloaded_songs = get_downloaded_songs(playlist_name)
-        
+        download_dir = get_download_directory()
         # Download songs in parallel (up to 8 at a time)
         with tqdm(total=total_tracks, desc="Processing Songs", unit="song", 
                  bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
@@ -187,16 +201,12 @@ def main():
                     if song_id in downloaded_songs:
                         pbar.update(1)
                         continue
-                    # Submit download task
                     futures.append(executor.submit(download_song, track['track'], playlist_name))
-                # As each download finishes, update the progress bar
                 for future in concurrent.futures.as_completed(futures):
-                    try:
-                        result = future.result()
-                    except Exception as e:
-                        print(f"Error downloading song: {e}", file=sys.stderr)
                     pbar.update(1)
-        print(f"Finished downloading playlist: {playlist_name}")
+        # Always update the m3u8 playlist after downloads
+        write_m3u8_playlist(playlist_name, download_dir)
+        print(f"Updated m3u8 playlist for {playlist_name}")
         
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)

@@ -146,6 +146,10 @@ def downloader_loop():
                                 print(f"Error parsing total tracks: {e}")
                         elif 'Checking already downloaded songs' in line:
                             current_progress['stage'] = 'Checking already downloaded songs...'
+                        elif line.startswith('Finished:'):
+                            song_info = line.replace('Finished:', '').strip()
+                            current_progress['current_song'] = song_info
+                            current_progress['stage'] = f"Last finished: {song_info}"
                         elif 'Downloading:' in line:
                             song_info = line.replace('Downloading:', '').strip()
                             if ' - ' in song_info:

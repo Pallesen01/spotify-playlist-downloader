@@ -85,7 +85,7 @@ def download_song(track, playlist_name):
         
         if result.returncode != 0:
             raise Exception(f"spotdl failed: {result.stderr}")
-            
+        print(f"Finished: {song_id}")
         return True
         
     except Exception as e:
@@ -177,11 +177,11 @@ def main():
         print("Checking already downloaded songs...")
         downloaded_songs = get_downloaded_songs(playlist_name)
         
-        # Download songs in parallel (up to 5 at a time)
+        # Download songs in parallel (up to 8 at a time)
         with tqdm(total=total_tracks, desc="Processing Songs", unit="song", 
                  bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
                  mininterval=0.1, file=sys.stderr) as pbar:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
                 futures = []
                 for track in tracks:
                     if not track['track']:

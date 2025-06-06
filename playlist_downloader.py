@@ -1,5 +1,6 @@
 import spotipy
 import os
+os.environ.setdefault('PAFY_BACKEND', 'internal')
 import urllib
 import pafy
 import shelve
@@ -136,13 +137,14 @@ songs, folder_name = getTracks(playlist_url, sp, limit=limit)
 os.makedirs(folder_name, exist_ok=True)
 
 print("Checking already downloaded songs...")
-#get URIs of downloaded songs
+# get URIs of downloaded songs
 URIs = []
 playlistFolderURIs = []
-for file in os.listdir(folder_name):
-    file_path = os.path.join(folder_name, file)
-    if os.path.isfile(file_path):
-        playlistFolderURIs.append(getUri(file_path))
+for root, _, files in os.walk(folder_name):
+    for file in files:
+        file_path = os.path.join(root, file)
+        if os.path.isfile(file_path):
+            playlistFolderURIs.append(getUri(file_path))
 
 
 #Don't download dupe songs from other folders
@@ -153,10 +155,11 @@ for folder in os.listdir():
         continue
     if not os.path.isdir(folder):
         continue
-    for file in os.listdir(folder):
-        file_path = os.path.join(folder, file)
-        if os.path.isfile(file_path):
-            URIs.append(getUri(file_path))
+    for root, _, files in os.walk(folder):
+        for file in files:
+            file_path = os.path.join(root, file)
+            if os.path.isfile(file_path):
+                URIs.append(getUri(file_path))
 
 for song in songs:
     if song.uri in URIs:

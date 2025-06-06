@@ -64,3 +64,6 @@ you can log into Spotify:
 ```bash
 python playlist_downloader.py <playlist_url> --user-auth
 ```
+
+## Folder Structure
+Downloaded songs are saved under `Playlist Name/Artist/(YEAR) Album` and include the track number in the filename (e.g. `1 - Track Title.mp3`).

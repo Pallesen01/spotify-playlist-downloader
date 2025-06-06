@@ -15,6 +15,18 @@ except ImportError:
     print("Warning: pafy not available, using yt-dlp only")
 
 
+def sanitize_filename(name: str) -> str:
+    """Sanitize a string to be safe for filesystem paths."""
+    invalid = [':', '?', ';', '<', '>', '*', '|', '/', '\\', '"']
+    for ch in invalid:
+        name = name.replace(ch, '')
+    name = (name.replace('á', 'a')
+                .replace('à', 'a')
+                .replace('ù', 'u')
+                .replace('Ä', 'A'))
+    return name.strip()
+
+
 
 def get_audio_bitrate(file_path):
     """Return the bitrate of the audio stream in bits per second or None."""
@@ -419,28 +431,42 @@ def getUri(file):
 
 #Delete all songs from playlist folder that aren't in playlist
 def delRemoved(playlistFolderURIs, songs, folder_name):
-    playlistURIs=(song.uri for song in songs)
-    songsToDel = list(set(playlistFolderURIs)-set(playlistURIs))
-    for file in os.listdir(folder_name):
-        if getUri(os.path.join(folder_name, file)) in songsToDel:
-            os.remove(os.path.join(folder_name, file))
+    playlistURIs = (song.uri for song in songs)
+    songsToDel = set(playlistFolderURIs) - set(playlistURIs)
+    for root, _, files in os.walk(folder_name):
+        for file in files:
+            file_path = os.path.join(root, file)
+            if getUri(file_path) in songsToDel:
+                os.remove(file_path)
 
 
 
 #class for spotify track
 class Song():
     def __init__(self, track, folder_name):
+        """Represents a single Spotify track."""
         self.track = track
         self.name = track['name']
-        self.name_file = track['name'].replace(':','').replace('?','').replace(';','').replace('<','').replace('>','').replace('*','').replace('|','').replace('/','').replace('\\','').replace('"','').replace("'","'").replace('á','a').replace('à','a').replace('ù','u').replace('Ä','A')
+
+        self.track_number = track.get('track_number')
+        clean_title = sanitize_filename(self.name)
+        if self.track_number:
+            clean_title = f"{self.track_number} - {clean_title}"
+        self.name_file = clean_title
+
         self.artists = [artist['name'] for artist in track['artists']]
-        self.duration = int(track['duration_ms']/1000)
-        dur_mins = str(float(track['duration_ms']/1000/60)).split('.')
-        self.duration_mins = dur_mins[0] + ':' + str(float('0.'+ dur_mins[1])*60).split('.')[0]
+        self.duration = int(track['duration_ms'] / 1000)
+        dur_mins = str(float(track['duration_ms'] / 1000 / 60)).split('.')
+        self.duration_mins = dur_mins[0] + ':' + str(float('0.' + dur_mins[1]) * 60).split('.')[0]
+
         self.album = track['album']['name']
+        self.album_year = track['album']['release_date'][:4]
         self.art_urls = [art['url'] for art in track['album']['images']]
         self.uri = track['uri']
-        self.folder_name = folder_name
+
+        artist_folder = sanitize_filename(self.artists[0])
+        album_folder = sanitize_filename(f"({self.album_year}) {self.album}")
+        self.folder_name = os.path.join(folder_name, artist_folder, album_folder)
 
     def get_link(self, quiet=False):
         import json

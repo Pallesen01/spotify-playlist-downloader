@@ -50,6 +50,21 @@ def format_duration(ms):
     seconds = ms // 1000
     return str(timedelta(seconds=seconds))
 
+def get_user_display_name(sp, user_id):
+    """Get display name for a user ID"""
+    try:
+        if not user_id or user_id == 'Unknown':
+            return user_id
+        
+        # If it already looks like a display name (has spaces, not all lowercase), keep it
+        if ' ' in user_id or (user_id[0].isupper() and not user_id.islower()):
+            return user_id
+            
+        user = sp.user(user_id)
+        return user.get('display_name') or user.get('id') or user_id
+    except:
+        return user_id
+
 def analyze_collaborator_contributions(playlist_url):
     """Analyze who added what to a collaborative playlist"""
     sp = get_spotify_client()
@@ -71,8 +86,9 @@ def analyze_collaborator_contributions(playlist_url):
             results = sp.next(results)
             tracks.extend(results['items'])
         
-        # Analyze contributions
+        # Analyze contributions and collect user IDs
         contributor_stats = defaultdict(lambda: {'count': 0, 'duration': 0, 'songs': []})
+        user_ids_to_resolve = set()
         
         for track_item in tracks:
             if track_item['track'] and track_item['track']['duration_ms']:
@@ -84,6 +100,11 @@ def analyze_collaborator_contributions(playlist_url):
                     else:
                         added_by = str(track_item['added_by'])
                 
+                # If it looks like a username/ID (not a display name), add to resolution list
+                if (added_by != 'Unknown' and 
+                    not (' ' in added_by or (added_by[0].isupper() and not added_by.islower()))):
+                    user_ids_to_resolve.add(added_by)
+                
                 duration_ms = track_item['track']['duration_ms']
                 song_name = track_item['track']['name']
                 artist_names = ', '.join([artist['name'] for artist in track_item['track']['artists']])
@@ -91,6 +112,23 @@ def analyze_collaborator_contributions(playlist_url):
                 contributor_stats[added_by]['count'] += 1
                 contributor_stats[added_by]['duration'] += duration_ms
                 contributor_stats[added_by]['songs'].append(f"{song_name} - {artist_names}")
+        
+        # Resolve user IDs to display names
+        id_to_name = {}
+        for user_id in user_ids_to_resolve:
+            display_name = get_user_display_name(sp, user_id)
+            if display_name != user_id:
+                id_to_name[user_id] = display_name
+        
+        # Update contributor stats with resolved names
+        if id_to_name:
+            updated_stats = defaultdict(lambda: {'count': 0, 'duration': 0, 'songs': []})
+            for contributor, stats in contributor_stats.items():
+                final_name = id_to_name.get(contributor, contributor)
+                updated_stats[final_name]['count'] += stats['count']
+                updated_stats[final_name]['duration'] += stats['duration']
+                updated_stats[final_name]['songs'].extend(stats['songs'])
+            contributor_stats = updated_stats
         
         # Sort contributors by total duration
         sorted_contributors = sorted(contributor_stats.items(), 
